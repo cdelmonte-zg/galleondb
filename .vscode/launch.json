@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug SQLite",
+      "type": "lldb",
+      "request": "launch",
+
+      "cargo": {
+        "args": [
+          "build"
+        ],
+        "cwd": "${workspaceFolder}",
+        "problemMatcher": "$rustc"
+      },
+
+      "args": [
+        "${workspaceFolder}/sample.db",
+        "select * from oranges"
+      ],
+
+      "cwd": "${workspaceFolder}",
+      "sourceLanguages": [
+        "rust"
+      ],
+      "terminal": "integrated"
+    }
+  ]
+}
