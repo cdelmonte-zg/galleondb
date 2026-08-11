@@ -2,6 +2,8 @@ use anyhow::{Error, Result, bail};
 use std::fs::File;
 use std::os::unix::fs::FileExt;
 
+mod scanner;
+
 #[derive(Debug, Clone, PartialEq)]
 enum Value {
     Null,
@@ -164,7 +166,6 @@ fn get_db_info(file: &mut File) -> Result<(u32, u16), Error> {
     let mut header = [0u8; 100];
     let mut page_header = [0u8; 8];
 
-
     file.read_exact_at(&mut header, 0)?;
     file.read_exact_at(&mut page_header, 100)?;
 
@@ -173,7 +174,7 @@ fn get_db_info(file: &mut File) -> Result<(u32, u16), Error> {
 
     let page_size = match page_size_encoded {
         65_356 => 1,
-        n=> n as u32
+        n => n as u32,
     };
 
     let cells_nr = u16::from_be_bytes([page_header[3], page_header[4]]);
@@ -181,7 +182,7 @@ fn get_db_info(file: &mut File) -> Result<(u32, u16), Error> {
     Ok((page_size, cells_nr))
 }
 
-fn get_cells(file: &mut File) -> Result<(u32, u16, Vec<Cell>), Error>{
+fn get_cells(file: &mut File) -> Result<(u32, u16, Vec<Cell>), Error> {
     let (page_size, cells_nr) = get_db_info(file)?;
 
     // The cell pointer array consists of K 2-byte integer offsets to the cell contents.
@@ -237,9 +238,9 @@ fn get_cells(file: &mut File) -> Result<(u32, u16, Vec<Cell>), Error>{
         }
 
         cells.push(Cell {
-            offset: offset,
+            offset,
             payload_size: payload_size_in_bytes,
-            row_id: row_id,
+            row_id,
             record: RowRecord {
                 header: record_header,
                 body: values,
@@ -248,10 +249,9 @@ fn get_cells(file: &mut File) -> Result<(u32, u16, Vec<Cell>), Error>{
     }
 
     Ok((page_size, cells_nr, cells))
-
 }
 
-fn get_table_rootpage(file: &mut File, table_name: &str) -> Result<Option<u64>, Error>{
+fn get_table_rootpage(file: &mut File, table_name: &str) -> Result<Option<u64>, Error> {
     let (_, _, cells) = get_cells(file)?;
 
     for cell in &cells {
@@ -264,10 +264,10 @@ fn get_table_rootpage(file: &mut File, table_name: &str) -> Result<Option<u64>, 
         ] = cell.record.body.as_slice()
         {
             if object_type == "table" && name.eq(table_name) {
-                return Ok(Some(u64::try_from(*rootpage)?))
+                return Ok(Some(u64::try_from(*rootpage)?));
             }
         }
-    };
+    }
 
     bail!("No page root found for table {}", table_name)
 }
@@ -326,7 +326,6 @@ fn main() -> Result<()> {
 
             let rootpage = get_table_rootpage(&mut file, table_name)?.unwrap();
 
-
             let (page_size, _) = get_db_info(&mut file)?;
 
             let offset = (rootpage - 1) * page_size as u64;
@@ -338,7 +337,7 @@ fn main() -> Result<()> {
 
             println!("{num_rows}");
         }
-        _ => bail!("Missing or invalid command passed: {}", command),
+        _ => scanner::repl(&command)?,
     }
 
     Ok(())
