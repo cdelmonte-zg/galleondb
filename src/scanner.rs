@@ -1,7 +1,7 @@
 use core::fmt;
 
 #[derive(Debug, PartialEq, Eq)]
-enum TokenType {
+pub enum TokenType {
     LeftParen,
     RightParen,
     LeftBrace,
@@ -13,6 +13,7 @@ enum TokenType {
     Semicolon,
     Slash,
     Star,
+    Start,
 
     // one or two character tokens.
     Bang,
@@ -37,6 +38,7 @@ enum TokenType {
     False,
     None,
     Select,
+    From,
     Create,
     Update,
     Delete,
@@ -45,15 +47,15 @@ enum TokenType {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct Token {
-    t_type: TokenType,
-    start: usize,
-    length: usize,
-    line: usize,
+pub struct Token {
+    pub t_type: TokenType,
+    pub start: usize,
+    pub length: usize,
+    pub line: usize,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct ScanError {
+pub struct ScanError {
     message: &'static str,
     line: usize,
 }
@@ -67,7 +69,7 @@ impl fmt::Display for ScanError {
 impl std::error::Error for ScanError {}
 
 #[derive(Debug)]
-struct Scanner<'src> {
+pub struct Scanner<'src> {
     source: &'src [u8],
     start: usize,
     current: usize,
@@ -75,7 +77,7 @@ struct Scanner<'src> {
 }
 
 impl<'src> Scanner<'src> {
-    fn init_scanner(src: &'src str) -> Self {
+    pub fn init_scanner(src: &'src str) -> Self {
         Scanner {
             source: src.as_bytes(),
             start: 0,
@@ -110,6 +112,10 @@ impl<'src> Scanner<'src> {
 
     fn is_at_end(&self) -> bool {
         self.current >= self.source.len()
+    }
+
+    pub fn is_eof(token: &Token) -> bool {
+        token.t_type == TokenType::Eof
     }
 
     fn skip_whitespace(&mut self) {
@@ -216,8 +222,17 @@ impl<'src> Scanner<'src> {
 
             Some(b'd') => self.check_keyword(1, 5, "elete", TokenType::Delete),
 
-            Some(b'f') => self.check_keyword(1, 4, "alse", TokenType::False),
-
+            Some(b'f') => {
+                if self.current - self.start > 1 {
+                    match self.source.get(self.start + 1).map(u8::to_ascii_lowercase) {
+                        Some(b'a') => self.check_keyword(1, 4, "alse", TokenType::False),
+                        Some(b'r') => self.check_keyword(1, 3, "rom" , TokenType::From),
+                        _ => TokenType::Identifier,
+                    }
+                } else {
+                    TokenType::Identifier
+                }
+            }, 
             Some(b'n') => self.check_keyword(1, 3, "one", TokenType::None),
 
             Some(b'o') => self.check_keyword(1, 1, "r", TokenType::Or),
@@ -266,7 +281,7 @@ impl<'src> Scanner<'src> {
         }
     }
 
-    fn scan_token(&mut self) -> Result<Token, ScanError> {
+    pub fn scan_token(&mut self) -> Result<Token, ScanError> {
         self.skip_whitespace();
         self.start = self.current;
 
@@ -336,42 +351,6 @@ impl<'src> Scanner<'src> {
     }
 }
 
-fn interpret(source: &str) -> anyhow::Result<()> {
-    let mut scanner = Scanner::init_scanner(source);
-
-    loop {
-        let token = scanner.scan_token()?;
-        let is_eof = token.t_type == TokenType::Eof;
-
-        println!("{token:?}");
-
-        if is_eof {
-            break;
-        }
-    }
-
-    Ok(())
-}
-
-pub fn repl(source: &str) -> anyhow::Result<()> {
-    let source = source.trim();
-
-    match source {
-        ".dbinfo" => exec_dbinfo(),
-        ".tables" => exec_tables(),
-        _ => interpret(source)
-    }
-}
-
-fn exec_dbinfo() -> anyhow::Result<()> {
-    println!("database page size: ...");
-    Ok(())
-}
-
-fn exec_tables() -> anyhow::Result<()> {
-    println!("table1 table2");
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {
