@@ -1,6 +1,6 @@
 use core::fmt;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TokenType {
     LeftParen,
     RightParen,
@@ -36,9 +36,16 @@ pub enum TokenType {
     Or,
     True,
     False,
-    None,
+    Null,
     Select,
     From,
+    Inner,
+    Left,
+    Right,
+    Join,
+    Full,
+    On,
+    Where,
     Create,
     Update,
     Delete,
@@ -46,7 +53,7 @@ pub enum TokenType {
     Eof,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Token {
     pub t_type: TokenType,
     pub start: usize,
@@ -70,10 +77,10 @@ impl std::error::Error for ScanError {}
 
 #[derive(Debug)]
 pub struct Scanner<'src> {
-    source: &'src [u8],
-    start: usize,
-    current: usize,
-    line: usize,
+    pub source: &'src [u8],
+    pub start: usize,
+    pub current: usize,
+    pub line: usize,
 }
 
 impl<'src> Scanner<'src> {
@@ -92,7 +99,7 @@ impl<'src> Scanner<'src> {
         Some(byte)
     }
 
-    fn peek(&self) -> Option<u8> {
+    pub fn peek(&self) -> Option<u8> {
         self.source.get(self.current).copied()
     }
 
@@ -227,21 +234,42 @@ impl<'src> Scanner<'src> {
                     match self.source.get(self.start + 1).map(u8::to_ascii_lowercase) {
                         Some(b'a') => self.check_keyword(1, 4, "alse", TokenType::False),
                         Some(b'r') => self.check_keyword(1, 3, "rom" , TokenType::From),
+                        Some(b'u') => self.check_keyword(1, 3, "ull", TokenType::Full),
                         _ => TokenType::Identifier,
                     }
                 } else {
                     TokenType::Identifier
                 }
             }, 
-            Some(b'n') => self.check_keyword(1, 3, "one", TokenType::None),
 
-            Some(b'o') => self.check_keyword(1, 1, "r", TokenType::Or),
+            Some(b'j') => self.check_keyword(1, 3, "oin", TokenType::Join),
+
+            Some(b'i') => self.check_keyword(1, 4, "nner", TokenType::Inner),
+
+            Some(b'l') => self.check_keyword(1, 3, "eft", TokenType::Left),
+
+            Some(b'n') => self.check_keyword(1, 3, "one", TokenType::Null),
+
+            Some(b'o') => {
+                if self.current - self.start > 1 {
+                    match self.source.get(self.start + 1).map(u8::to_ascii_lowercase) {
+                        Some(b'n') => self.check_keyword(1, 1, "n", TokenType::On),
+                        Some(b'r') => self.check_keyword(1, 1, "r", TokenType::Or),
+                        _ => TokenType::Identifier
+                    }
+                } else {
+                    TokenType::Identifier
+                }
+            }
+            Some(b'r') => self.check_keyword(1, 4, "ight", TokenType::Right),
 
             Some(b's') => self.check_keyword(1, 5, "elect", TokenType::Select),
 
             Some(b't') => self.check_keyword(1, 3, "rue", TokenType::True),
 
             Some(b'u') => self.check_keyword(1, 5, "pdate", TokenType::Update),
+
+            Some(b'w') => self.check_keyword(1, 4, "here", TokenType::Where),
 
             _ => TokenType::Identifier,
         }
@@ -560,6 +588,29 @@ mod tests {
     #[case("se", TokenType::Identifier, 0, 2, 1)]
     #[case("selection", TokenType::Identifier, 0, 9, 1)]
     fn scans_select_keyword(
+        #[case] source: &str,
+        #[case] expected_type: TokenType,
+        #[case] expected_start: usize,
+        #[case] expected_length: usize,
+        #[case] expected_line: usize,
+    ) {
+        let mut scanner = Scanner::init_scanner(source);
+
+        let token = scanner.scan_token().unwrap();
+
+        assert_eq!(token.t_type, expected_type);
+        assert_eq!(token.start, expected_start);
+        assert_eq!(token.length, expected_length);
+        assert_eq!(token.line, expected_line);
+    }
+
+    #[rstest]
+    #[case("left", TokenType::Left, 0, 4, 1)]
+    #[case("   left", TokenType::Left, 3, 4, 1)]
+    #[case("\nleft", TokenType::Left, 1, 4, 2)]
+    #[case("le", TokenType::Identifier, 0, 2, 1)]
+    #[case("leftion", TokenType::Identifier, 0, 7, 1)]
+    fn scans_left_keyword(
         #[case] source: &str,
         #[case] expected_type: TokenType,
         #[case] expected_start: usize,
