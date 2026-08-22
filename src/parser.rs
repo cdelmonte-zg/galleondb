@@ -1,5 +1,5 @@
 use anyhow::bail;
-use crate::{parser::TableExpr::JoinExpr, scanner::{Scanner, Token, TokenType::{self, Join}}};
+use crate::{scanner::{Scanner, Token, TokenType}};
 
 #[derive(Debug)]
 pub enum Statement {
@@ -40,7 +40,7 @@ pub struct Select {
 #[derive(Debug)]
 pub enum TableExpr {
     Table(String),
-    JoinExpr {
+    Join {
         left: Box<TableExpr>,
         kind: JoinType,
         right: Box<TableExpr>,
@@ -86,7 +86,9 @@ pub enum BinaryOperation {
     Equal,
     NotEqual,
     GreaterThan,
+    GreaterEqualThan,
     LessThan,
+    LessEqualThan,
     And,
     Or,
 }
@@ -136,13 +138,16 @@ impl <'a, 'src> Parser<'a, 'src> {
         Ok(())
     }
 
-    fn expect(&mut self, t_type: TokenType) -> anyhow::Result<bool> {
+    fn expect(&mut self, expected_t_type: TokenType) -> anyhow::Result<()> {
+        if self.current.t_type != expected_t_type {
+            bail!(
+                "Current Token Type {:?} is not the expected one {:?}.",
+                self.current.t_type, expected_t_type
+            );    
+        } 
+
         self.advance()?;
-        if self.current.t_type == t_type {
-            Ok(true) 
-        } else {
-            Ok(false)
-        }
+        Ok(())
     }
 
     fn parse(&mut self) -> anyhow::Result<Option<Statement>>{
@@ -173,93 +178,294 @@ impl <'a, 'src> Parser<'a, 'src> {
     }
 
     fn parse_from(&mut self) -> anyhow::Result<TableExpr> {
-        self.advance()?;
-        let table_expr = TableExpr::Table(self.current_value()?.to_string());
+        self.expect(TokenType::From)?;
+        
+        if self.current.t_type != TokenType::Identifier {
+            bail!("Expected table name.");
+        }
+
+        let mut table_expr = TableExpr::Table(self.current_value()?.to_string());
         
         self.advance()?;
-        match self.current.t_type {
-            TokenType::Where | TokenType::Eof => Ok(table_expr),
-            _ => self.parse_join(table_expr),
+
+
+        while matches!(
+            self.current.t_type, 
+            TokenType::Join 
+            | TokenType::Left
+            | TokenType::Right
+            | TokenType::Inner
+            | TokenType::Full
+        ) {
+            table_expr = self.parse_join(table_expr)?;
         }
+        
+        Ok(table_expr)
     }
 
     fn parse_join(&mut self, table_expr: TableExpr) -> anyhow::Result<TableExpr> {
-        if Scanner::is_eof(&self.current) {
-            return Ok(table_expr)
-        }
-
-        let kind = if self.current.t_type == TokenType::Join {
+        
+        let kind = match self.current.t_type {
+            TokenType::Join => {
+                self.advance()?;
                 JoinType::Inner
-        } else {
-                match self.current.t_type {
-                TokenType::Left => {
-                    if !self.expect(TokenType::Join)? {
-                        bail!("Invalid syntax")
-                    };
-                    JoinType::Left
-                },
-                TokenType::Right  => {
-                    if !self.expect(TokenType::Join)? {
-                        bail!("Invalid syntax")
-                    };
-                    JoinType::Right
-                },
-                TokenType::Inner => {
-                    if !self.expect(TokenType::Join)? {
-                        bail!("Invalid syntax")
-                    };
-                    JoinType::Inner
-                },
-                TokenType::Full => {
-                    if !self.expect(TokenType::Join)? {
-                        bail!("Invalid syntax")
-                    };
-                    JoinType::Full
-                },
-                _ => bail!("Malformed From clause: {:?}", self.current.t_type)
+            },
+            TokenType::Left => {
+                self.advance()?;
+                self.expect(TokenType::Join)?;
+                JoinType::Left
+            },
+            TokenType::Right => {
+                self.advance()?;
+                self.expect(TokenType::Join)?;
+                JoinType::Right
+            },
+            TokenType::Full  => {
+                self.advance()?;
+                self.expect(TokenType::Join)?;
+                JoinType::Full
+            },
+            TokenType::Inner => {
+                self.advance()?;
+                self.expect(TokenType::Join)?;
+                JoinType::Inner
+            },
+            _ => {
+                bail!("Join type expected, found {:?}", self.current.t_type);
             }
+
         };
 
-        if !self.expect(TokenType::Identifier)? {
-            bail!("identifier expected, found {:?}", self.current.t_type);
+        if self.current.t_type != TokenType::Identifier {
+            bail!("Table name expected, found {:?}", self.current.t_type);
         }
         
-        let right = Box::new(TableExpr::Table(self.current_value()?.to_string()));        
-        
-        if !self.expect(TokenType::On)? {
-            bail!("expected token condition, found {:?}", self.current.t_type)
-        }
-
-        let cond = Expr::BinaryOp(self.parse_binary_op()?);
-
-        let join_expr = TableExpr::JoinExpr { 
-            left: Box::new(table_expr),
-            kind,
-            right,
-            cond
-        };
+        let right_table_expr = TableExpr::Table(self.current_value()?.to_string());        
 
         self.advance()?;
 
-        if self.current.t_type == TokenType::Where || Scanner::is_eof(&self.current){
-            return Ok(join_expr)
-        } else {
-            return Ok(self.parse_join(join_expr)?)
+        self.expect(TokenType::On)?;
+        
+        let cond = self.parse_expression()?;
+
+        Ok(TableExpr::Join { 
+            left: Box::new(table_expr),
+            kind,
+            right: Box::new(right_table_expr),
+            cond
+        })
+    }
+
+    fn parse_expression(&mut self) -> anyhow::Result<Expr> {
+        self.parse_or()
+    }
+
+    // or → and ("OR" and)*
+    fn parse_or(&mut self) -> anyhow::Result<Expr> {
+        let mut expr = self.parse_and()?;
+        
+        while self.current.t_type == TokenType::Or {
+            self.advance()?;
+
+            let right = self.parse_and()?;
+
+            expr = Expr::BinaryOp(BinaryOp { 
+                left: Box::new(expr),
+                op: BinaryOperation::Or,
+                right: Box::new(right) 
+            });
         }
+
+        Ok(expr)
+    }
+
+    // and → not ("AND" not)*
+    fn parse_and(&mut self) -> anyhow::Result<Expr> {
+        let mut expr = self.parse_not()?;
+
+        while self.current.t_type == TokenType::And {
+            self.advance()?;
+
+            let right = self.parse_not()?;
+
+            expr = Expr::BinaryOp(BinaryOp {
+                left: Box::new(expr),
+                op: BinaryOperation::And,
+                right: Box::new(right),
+            });
+        }
+
+        Ok(expr)
+    }
+
+    // not → "NOT" not | equality
+    fn parse_not(&mut self) -> anyhow::Result<Expr> {
+        if self.current.t_type == TokenType::Not {
+            self.advance()?;
+
+            let operand = self.parse_not()?;
+
+            return Ok(Expr::UnaryOp(UnaryOp {
+                op: UnaryOperation::Not,
+                operand: Box::new(operand),
+            }));
+        }
+
+        self.parse_equality()
+    }
+
+    // equality → comparison (("=" | "!=") comparison)*
+    fn parse_equality(&mut self) -> anyhow::Result<Expr> {
+        let mut expr = self.parse_comparison()?;
+
+        while self.current.t_type == TokenType::Equal || self.current.t_type == TokenType::BangEqual {
+            let op = if self.current.t_type == TokenType::Equal {
+                BinaryOperation::Equal
+            } else {
+                BinaryOperation::NotEqual
+            };
+
+            self.advance()?;
+
+            let right = self.parse_comparison()?;
+
+            expr = Expr::BinaryOp(BinaryOp {
+                left: Box::new(expr),
+                op,
+                right: Box::new(right),
+            });
+        }
+
+        Ok(expr)
+    }
+
+    // comparison  → term (("<" | ">" | "<=" | ">=") term)*
+    fn parse_comparison(&mut self) -> anyhow::Result<Expr> {
+        let mut expr = self.parse_term()?;
+
+        while matches!(self.current.t_type, TokenType::Less | TokenType::Greater | TokenType::LessEqual | TokenType::GreaterEqual) {
+            let op = match self.current.t_type {
+                TokenType::Less => BinaryOperation::LessThan,
+                TokenType::LessEqual => BinaryOperation::LessEqualThan,
+                TokenType::Greater => BinaryOperation::GreaterThan,
+                TokenType::GreaterEqual => BinaryOperation::GreaterEqualThan,
+                _ => bail!("Wrong comparison operator: {:?} ", self.current.t_type),
+            };
+
+            self.advance()?;
+
+            let right = self.parse_term()?;
+
+            expr = Expr::BinaryOp(BinaryOp { 
+                left: Box::new(expr),
+                op,
+                right: Box::new(right),
+            })
+        }
+
+        Ok(expr)
+    }
+
+    // term → factor (("+" | "-") factor)*
+    fn parse_term(&mut self) -> anyhow::Result<Expr> {
+        let mut expr = self.parse_factor()?;
+        
+        while matches!(self.current.t_type, TokenType::Plus | TokenType::Minus) {
+            let op = if self.current.t_type == TokenType::Plus {
+                BinaryOperation::Add
+            } else {
+                BinaryOperation::Subtract
+            };
+
+            self.advance()?;
+
+            let right = self.parse_factor()?;
+
+            expr = Expr::BinaryOp(BinaryOp {
+                left: Box::new(expr),
+                op,
+                right: Box::new(right), 
+            });
+        }
+
+        Ok(expr)
+    }
+
+    // factor → unary (("*" | "/") unary)*
+    fn parse_factor(&mut self) -> anyhow::Result<Expr> {
+        let mut expr = self.parse_unary()?;
+
+        while matches!(self.current.t_type, TokenType::Star | TokenType::Slash) {
+            let op = if self.current.t_type == TokenType::Star {
+                BinaryOperation::Multiply
+            } else {
+                BinaryOperation::Divide
+            };
+
+            self.advance()?;
+
+            let right = self.parse_unary()?;
+
+            expr = Expr::BinaryOp(BinaryOp { 
+                left: Box::new(expr), 
+                op, 
+                right: Box::new(right),
+            });
+        }
+
+        Ok(expr)
     }
 
 
-    fn parse_binary_op(&mut self) -> anyhow::Result<BinaryOp>{
-        
-        let left= ;
-        let op,
-        let right,
-        
-        BinaryOp {
-            left,
-            op,
-            right,
+    // unary       → ("-" | "+") unary
+    //             | primary
+    fn parse_unary(&mut self) -> anyhow::Result<Expr>
+    {
+        if matches!(self.current.t_type, TokenType::Not | TokenType::Minus | TokenType::Plus) {
+            let op = match self.current.t_type {
+                TokenType::Minus => UnaryOperation::Minus,
+                TokenType::Plus => UnaryOperation::Plus,
+                _ => unreachable!(),
+            };
+            
+            self.advance()?;
+            let operand = Box::new(self.parse_unary()?);
+
+            return Ok(Expr::UnaryOp(UnaryOp { 
+                op, 
+                operand 
+            }))
         }
+            
+        self.parse_primary()
+    }
+
+    // primary     → NUMBER
+    //             | STRING
+    //             | TRUE
+    //             | FALSE
+    //             | NULL
+    //             | IDENTIFIER
+    //             | "(" expression ")"
+    fn parse_primary(&mut self) -> anyhow::Result<Expr> {
+        let expr = match self.current.t_type {
+            TokenType::Number => Expr::Literal(Literal::Integer(self.current_value()?.parse::<isize>()?)),
+            TokenType::Identifier => Expr::Column(self.current_value()?.to_string()),
+            TokenType::String => Expr::Literal(Literal::String(self.current_value()?.to_string())),
+            TokenType::True => Expr::Literal(Literal::Boolean(true)),
+            TokenType::False => Expr::Literal(Literal::Boolean(false)),
+            TokenType::Null => Expr::Literal(Literal::Null),
+            TokenType::LeftParen => {
+                self.advance()?;
+                let expr = self.parse_expression()?;
+                self.expect(TokenType::RightParen)?;
+                return Ok(expr);
+            },
+            _ => bail!("Expected expression: {:?}", self.current.t_type),
+        };
+
+        self.advance()?;
+        Ok(expr)
     }
 
     fn current_value(&self) -> Result<&str, std::str::Utf8Error> {
@@ -281,24 +487,15 @@ impl <'a, 'src> Parser<'a, 'src> {
     fn parse_projection(&mut self) -> anyhow::Result<Vec<Expr>> {
         let mut projections = vec!();
 
-        while !matches!(self.current.t_type, TokenType::From) {   
-            if Scanner::is_eof(&self.current) {
-                bail!("Select needs a From");
+        loop {
+            projections.push(self.parse_expression()?);
+
+            if self.current.t_type == TokenType::Comma {
+                self.advance()?;
+                continue;
             }
-            
-            projections.push(match self.current.t_type {
-                TokenType::Number => Expr::Literal(self::Literal::Integer(self.current_value()?.parse::<isize>()?)),
-                TokenType::Identifier => Expr::Column(self.current_value()?.to_string()),
-                TokenType::True => Expr::Literal(Literal::Boolean(true)),
-                TokenType::False => Expr::Literal(Literal::Boolean(false)),
-                TokenType::Null => Expr::Literal(Literal::Null),
-                TokenType::Comma => {
-                    self.advance()?;
-                    continue;
-                }
-                _ => bail!("Projection token not recognized"),
-            });
-            self.advance()?;
+
+            break;
         }
 
         Ok(projections)

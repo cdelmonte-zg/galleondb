@@ -36,6 +36,7 @@ pub enum TokenType {
     Or,
     True,
     False,
+    Not,
     Null,
     Select,
     From,
@@ -248,7 +249,17 @@ impl<'src> Scanner<'src> {
 
             Some(b'l') => self.check_keyword(1, 3, "eft", TokenType::Left),
 
-            Some(b'n') => self.check_keyword(1, 3, "one", TokenType::Null),
+            Some(b'n') => {
+                if self.current - self.start > 1 {
+                    match self.source.get(self.start + 1).map(u8::to_ascii_lowercase) {
+                        Some(b'o') => self.check_keyword(1, 2, "ot", TokenType::Not),
+                        Some(b'u') => self.check_keyword(1, 3, "ull", TokenType::Null),
+                        _ => TokenType::Identifier,
+                    }
+                } else {
+                    TokenType::Identifier
+                }
+            },
 
             Some(b'o') => {
                 if self.current - self.start > 1 {
