@@ -1,5 +1,5 @@
 use anyhow::bail;
-use crate::{scanner::{Scanner, Token, TokenType}};
+use crate::{scanner::{Scanner, Token, TokenType}, semantic};
 
 #[derive(Debug)]
 pub enum Statement {
@@ -686,12 +686,13 @@ impl <'a, 'src> Parser<'a, 'src> {
     }
 }
 
-
 pub fn interpret(source: &str) -> anyhow::Result<()> {
     let mut scanner = Scanner::init_scanner(source);
     let mut parser = Parser::init(&mut scanner)?;
 
-    let _ = parser.parse()?;
+    if let Some(ast) = parser.parse()? {    
+        let _ = semantic::analyze(ast);
+    }
 
     Ok(())
 }

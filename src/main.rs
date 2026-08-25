@@ -5,6 +5,7 @@ mod database;
 mod scanner;
 mod shell;
 mod parser;
+mod semantic;
 
 fn main() -> anyhow::Result<()> {
     // Parse arguments
