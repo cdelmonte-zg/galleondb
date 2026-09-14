@@ -1,11 +1,6 @@
 use anyhow::bail;
+use codecrafters_sqlite::engine::Engine;
 use std::fs::File;
-
-mod database;
-mod scanner;
-mod shell;
-mod parser;
-mod semantic;
 
 fn main() -> anyhow::Result<()> {
     // Parse arguments
@@ -16,37 +11,33 @@ fn main() -> anyhow::Result<()> {
         _ => {}
     }
 
-    let mut file = File::open(&args[1])?;
-
+    let file = File::open(&args[1])?;
     let command = args[2].trim();
 
-    let _ = match command {
-        ".dbinfo" | ".tables" => shell::run(&command, &mut file),
-        _ => parser::interpret(&command),
-    };
+    let mut engine = Engine::open(file)?;
+    engine.execute(command)?;
 
     Ok(())
-
-    // match command.as_str() {
-    //     "select" => {
-    //         let table_name = match expression.last() {
-    //             Some(s) => s,
-    //             None => return Ok(()),
-    //         };
-
-    //         let rootpage = get_table_rootpage(&mut file, table_name)?.unwrap();
-
-    //         let (page_size, _) = get_db_info(&mut file)?;
-
-    //         let offset = (rootpage - 1) * page_size as u64;
-    //         let mut page_header = [0u8; 2];
-
-    //         file.read_exact_at(&mut page_header, offset + 3)?;
-
-    //         let num_rows = u16::from_be_bytes([page_header[0], page_header[1]]);
-
-    //         println!("{num_rows}");
-    //     }
-    // }
-
 }
+
+// match command.as_str() {
+//     "select" => {
+//         let table_name = match expression.last() {
+//             Some(s) => s,
+//             None => return Ok(()),
+//         };
+
+//         let rootpage = get_table_rootpage(&mut file, table_name)?.unwrap();
+
+//         let (page_size, _) = get_db_info(&mut file)?;
+
+//         let offset = (rootpage - 1) * page_size as u64;
+//         let mut page_header = [0u8; 2];
+
+//         file.read_exact_at(&mut page_header, offset + 3)?;
+
+//         let num_rows = u16::from_be_bytes([page_header[0], page_header[1]]);
+
+//         println!("{num_rows}");
+//     }
+// }

@@ -1,12 +1,34 @@
-use crate::parser::{BinaryOperation, Expr, Literal, Statement, UnaryOperation};
+use crate::semantic::{catalog::Catalog, resolver::Resolver};
 
+use super::parser::{BinaryOperation, Literal, Statement, UnaryOperation};
+use functions::FunctionId;
+
+pub mod catalog;
+mod functions;
 mod resolver;
 mod types;
-mod functions;
+
+#[derive(Debug)]
+pub enum BoundStatement {
+    BoundQuery(BoundQuery),
+}
+
+#[derive(Debug)]
+pub struct BoundQuery {
+    bound_select: BoundSelect,
+    // bound_orderby: Vec<BoundOrderBy>,
+    // bound_limit: Option<BoundLimit>
+}
 
 #[derive(Debug)]
 pub struct BoundSelect {
     bound_projections: Vec<BoundExpr>,
+    bound_from: Option<Bound_TableExpr>,
+}
+
+#[derive(Debug)]
+pub enum Bound_TableExpr {
+    Table(BoundTable),
 }
 
 #[derive(Debug)]
@@ -29,10 +51,16 @@ pub enum BoundExprKind {
     Binary {
         left: Box<BoundExpr>,
         op: BinaryOperation,
-        right: Box<BoundExpr>, 
+        right: Box<BoundExpr>,
     },
 
     FunctionCall(FunctionCall),
+}
+
+#[derive(Debug)]
+pub struct BoundTable {
+    schema_index: usize,
+    relation_index: usize,
 }
 
 #[derive(Debug)]
@@ -43,8 +71,8 @@ pub struct BoundColumn {
 
 #[derive(Debug)]
 pub struct FunctionCall {
-    function: BoundFunction,
-    args: Vec<BoundArguments>
+    function: FunctionId,
+    args: Vec<BoundExpr>,
 }
 
 #[derive(Debug)]
@@ -58,10 +86,10 @@ pub enum LogicalType {
     Integer,
     Real,
     Text,
-    Boolean
+    Boolean,
 }
 
-
-pub fn analyze(statement: Statement) {
-    resolver::resolve();   
+pub fn analyze(statement: &Statement, catalog: &mut Catalog) -> anyhow::Result<BoundStatement> {
+    let mut resolver = Resolver::new(catalog);
+    resolver.resolve(statement)
 }

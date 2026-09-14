@@ -157,13 +157,12 @@ impl<'src> Scanner<'src> {
         loop {
             match self.peek() {
                 Some(c) if c == delimiter => {
-                    
                     if self.peek_next() == Some(delimiter) {
                         self.advance();
                         self.advance();
                         continue;
                     }
-                    
+
                     self.advance();
                     return Ok(self.make_token(token_type));
                 }
@@ -239,7 +238,7 @@ impl<'src> Scanner<'src> {
                 } else {
                     TokenType::Identifier
                 }
-            },
+            }
 
             Some(b'b') => self.check_keyword(1, 1, "y", TokenType::By),
 
@@ -251,33 +250,35 @@ impl<'src> Scanner<'src> {
                         Some(b'e') => {
                             if self.current - self.start > 2 {
                                 match self.source.get(self.start + 2).map(u8::to_ascii_lowercase) {
-                                    Some(b'l') => self.check_keyword(1, 5, "elete", TokenType::Delete),
+                                    Some(b'l') => {
+                                        self.check_keyword(1, 5, "elete", TokenType::Delete)
+                                    }
                                     Some(b's') => self.check_keyword(1, 3, "esc", TokenType::Desc),
-                                    _ => TokenType::Identifier
+                                    _ => TokenType::Identifier,
                                 }
                             } else {
                                 TokenType::Identifier
                             }
-                        },
-                        _ => TokenType::Identifier
+                        }
+                        _ => TokenType::Identifier,
                     }
                 } else {
                     TokenType::Identifier
                 }
-            },
+            }
 
             Some(b'f') => {
                 if self.current - self.start > 1 {
                     match self.source.get(self.start + 1).map(u8::to_ascii_lowercase) {
                         Some(b'a') => self.check_keyword(1, 4, "alse", TokenType::False),
-                        Some(b'r') => self.check_keyword(1, 3, "rom" , TokenType::From),
+                        Some(b'r') => self.check_keyword(1, 3, "rom", TokenType::From),
                         Some(b'u') => self.check_keyword(1, 3, "ull", TokenType::Full),
                         _ => TokenType::Identifier,
                     }
                 } else {
                     TokenType::Identifier
                 }
-            }, 
+            }
 
             Some(b'j') => self.check_keyword(1, 3, "oin", TokenType::Join),
 
@@ -286,14 +287,14 @@ impl<'src> Scanner<'src> {
             Some(b'l') => {
                 if self.current - self.start > 1 {
                     match self.source.get(self.start + 1).map(u8::to_ascii_lowercase) {
-                        Some(b'e') => self.check_keyword(1, 3 , "eft", TokenType::Left),
-                        Some(b'i') => self.check_keyword(1, 4 , "imit", TokenType::Limit),
-                        _ => TokenType::Identifier
+                        Some(b'e') => self.check_keyword(1, 3, "eft", TokenType::Left),
+                        Some(b'i') => self.check_keyword(1, 4, "imit", TokenType::Limit),
+                        _ => TokenType::Identifier,
                     }
                 } else {
                     TokenType::Identifier
                 }
-            },
+            }
 
             Some(b'n') => {
                 if self.current - self.start > 1 {
@@ -305,7 +306,7 @@ impl<'src> Scanner<'src> {
                 } else {
                     TokenType::Identifier
                 }
-            },
+            }
 
             Some(b'o') => {
                 if self.current - self.start > 1 {
@@ -315,19 +316,21 @@ impl<'src> Scanner<'src> {
                         Some(b'r') => {
                             if self.current - self.start > 2 {
                                 match self.source.get(self.start + 2).map(u8::to_ascii_lowercase) {
-                                    Some(b'd') => self.check_keyword(1, 4, "rder", TokenType::Order),
-                                    _ => TokenType::Identifier
+                                    Some(b'd') => {
+                                        self.check_keyword(1, 4, "rder", TokenType::Order)
+                                    }
+                                    _ => TokenType::Identifier,
                                 }
                             } else {
                                 TokenType::Or
                             }
                         }
-                        _ => TokenType::Identifier
+                        _ => TokenType::Identifier,
                     }
                 } else {
                     TokenType::Identifier
                 }
-            },
+            }
 
             Some(b'r') => self.check_keyword(1, 4, "ight", TokenType::Right),
 
@@ -446,7 +449,6 @@ impl<'src> Scanner<'src> {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
