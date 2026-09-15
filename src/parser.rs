@@ -1,14 +1,47 @@
-use crate::scanner::{Scanner, Token, TokenType};
+use std::io::ErrorKind::TimedOut;
+
+use crate::{
+    scanner::{Scanner, Token, TokenType},
+    semantic::LogicalType,
+};
 use anyhow::bail;
 
 #[derive(Debug)]
 pub(crate) enum Statement {
     Query(Query),
+    CreateTable(CreateTable),
     // Alter,
     // Insert,
     // Update,
     // Delete,
-    // Drop
+    // Drop,
+}
+
+#[derive(Debug)]
+pub(crate) struct CreateTable {
+    pub(crate) name: String,
+    pub(crate) columns: Vec<ColumnDefinition>,
+}
+
+#[derive(Debug)]
+pub(crate) struct ColumnDefinition {
+    pub(crate) name: String,
+    pub(crate) declared_type: DeclaredType,
+    pub(crate) constraints: Vec<ColumnConstraint>,
+}
+
+#[derive(Debug)]
+pub(crate) struct DeclaredType {
+    pub(crate) name: String,
+    pub(crate) parameters: Vec<u32>,
+}
+
+#[derive(Debug)]
+pub(crate) enum ColumnConstraint {
+    NotNull,
+    Null,
+    PrimaryKey,
+    Autoincrement
 }
 
 #[derive(Debug)]
@@ -86,8 +119,8 @@ pub(crate) struct BinaryOp {
 
 #[derive(Debug)]
 pub(crate) struct FunctionCall {
-    name: String,
-    args: Vec<FunctionArgument>,
+    pub(crate) name: String,
+    pub(crate) args: Vec<FunctionArgument>,
 }
 
 #[derive(Debug)]
@@ -154,7 +187,9 @@ impl<'a, 'src> Parser<'a, 'src> {
     fn advance(&mut self) -> anyhow::Result<()> {
         self.previous = self.current.clone();
         self.current = self.scanner.scan_token()?;
+
         println!("{:?}", self.current);
+
         Ok(())
     }
 
@@ -184,26 +219,166 @@ impl<'a, 'src> Parser<'a, 'src> {
                 let order = self.parse_order_by()?;
                 let limit = self.parse_limit()?;
 
-                if self.current.t_type == TokenType::Semicolon {
-                    self.advance()?;
-                }
-
-                if !Scanner::is_eof(&self.current) {
-                    bail!("Unexpected token {:?}", self.current.t_type);
-                }
-
                 Statement::Query(Query {
                     select,
                     order,
                     limit,
                 })
             }
+
+            TokenType::Create => {
+                self.advance()?;
+                self.expect(TokenType::Table)?;
+
+                if self.current.t_type != TokenType::Identifier {
+                    bail!("Expected table name.");
+                }
+
+                let name = self.current_value()?.to_string();
+                self.advance()?;
+
+                let columns = self.parse_column_definitions()?;
+
+                Statement::CreateTable(CreateTable { name, columns })
+            }
+
             _ => bail!("Unexpected token {:?}", self.current.t_type),
         };
 
-        println!("{:?}", statement);
+        if self.current.t_type == TokenType::Semicolon {
+            self.advance()?;
+        }
+
+        if !Scanner::is_eof(&self.current) {
+            bail!("Unexpected token {:?}", self.current.t_type);
+        }
 
         Ok(Some(statement))
+    }
+
+    fn parse_column_definitions(&mut self) -> anyhow::Result<Vec<ColumnDefinition>> {
+        self.expect(TokenType::LeftParen)?;
+
+        let mut column_definitions = vec![];
+        column_definitions.push(self.parse_column_definition()?);
+
+        while self.current.t_type == TokenType::Comma {
+            self.advance()?;
+
+            column_definitions.push(self.parse_column_definition()?);
+        }
+
+        self.expect(TokenType::RightParen)?;
+
+        Ok(column_definitions)
+    }
+
+    fn parse_column_definition(&mut self) -> anyhow::Result<ColumnDefinition> {
+        if self.current.t_type != TokenType::Identifier {
+            bail!("Expected column name.");
+        }
+        let name = self.current_value()?.to_string();
+        self.advance()?;
+
+        let declared_type = self.parse_declared_type()?;
+        let constraints = self.parse_column_constraints()?;
+
+        let column_definition = ColumnDefinition {
+            name,
+            declared_type,
+            constraints,
+        };
+
+        Ok(column_definition)
+    }
+
+    fn parse_declared_type(&mut self) -> anyhow::Result<DeclaredType> {
+        if self.current.t_type != TokenType::Identifier {
+            bail!("Expected declared type.");
+        }
+
+        let name = self.current_value()?.to_ascii_uppercase();
+        self.advance()?;
+
+        let parameters = if self.current.t_type == TokenType::LeftParen {
+            self.parse_type_parameters()?
+        } else {
+            vec![]
+        };
+
+        Ok(DeclaredType { name, parameters })
+    }
+
+    fn parse_type_parameters(&mut self) -> anyhow::Result<Vec<u32>> {
+        let mut parameters = vec![];
+
+        self.expect(TokenType::LeftParen)?;
+
+        if self.current.t_type != TokenType::Number {
+            bail!("Number expected as parameter");
+        }
+
+        parameters.push(self.current_value()?.parse::<u32>()?);
+        self.advance()?;
+
+        while self.current.t_type == TokenType::Comma {
+            self.advance()?;
+
+            if self.current.t_type != TokenType::Number {
+                bail!("Number expected as parameter");
+            }
+            parameters.push(self.current_value()?.parse::<u32>()?);
+
+            self.advance()?;
+        }
+
+        self.expect(TokenType::RightParen)?;
+
+        Ok(parameters)
+    }
+
+    fn parse_column_constraints(&mut self) -> anyhow::Result<Vec<ColumnConstraint>> {
+        let mut constraints = vec![];
+
+        loop {
+            match self.current.t_type {
+                TokenType::Not => {
+                    self.advance()?;
+                    self.expect(TokenType::Null)?;
+
+                    constraints.push(ColumnConstraint::NotNull);
+                }
+                
+                TokenType::Null => {
+                    self.advance()?;
+
+                    constraints.push(ColumnConstraint::Null);
+                }
+
+                TokenType::Primary => {
+                    self.advance()?;
+                    self.expect(TokenType::Key)?;
+
+                    constraints.push(ColumnConstraint::PrimaryKey);
+                }
+
+                TokenType::Autoincrement => {
+                    self.advance()?;
+                    constraints.push(ColumnConstraint::Autoincrement);
+                }
+
+                TokenType::Comma | TokenType::RightParen => {
+                    break;
+                }
+                
+                _ => bail!(
+                    "Unespected token in column constrain {:?}",
+                    self.current.t_type
+                ),
+            }
+        }
+
+        Ok(constraints)
     }
 
     fn parse_select(&mut self) -> anyhow::Result<Select> {

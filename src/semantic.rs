@@ -6,6 +6,7 @@ use functions::FunctionId;
 pub mod catalog;
 mod functions;
 mod resolver;
+mod schema_parser;
 mod types;
 
 #[derive(Debug)]
@@ -54,13 +55,13 @@ pub enum BoundExprKind {
         right: Box<BoundExpr>,
     },
 
-    FunctionCall(FunctionCall),
+    FunctionCall(BoundFunctionCall),
 }
 
 #[derive(Debug)]
 pub struct BoundTable {
-    schema_index: usize,
     relation_index: usize,
+    root_page: usize,
 }
 
 #[derive(Debug)]
@@ -70,9 +71,15 @@ pub struct BoundColumn {
 }
 
 #[derive(Debug)]
-pub struct FunctionCall {
+pub struct BoundFunctionCall {
     function: FunctionId,
-    args: Vec<BoundExpr>,
+    args: Vec<BoundFunctionArgument>,
+}
+
+#[derive(Debug)]
+pub enum BoundFunctionArgument {
+    Expr(BoundExpr),
+    Wildcard,
 }
 
 #[derive(Debug)]
@@ -87,9 +94,12 @@ pub enum LogicalType {
     Real,
     Text,
     Boolean,
+    Blob,
+    Numeric,
+    Null,
 }
 
-pub fn analyze(statement: &Statement, catalog: &mut Catalog) -> anyhow::Result<BoundStatement> {
+pub fn analyze(statement: &Statement, catalog: &Catalog) -> anyhow::Result<BoundStatement> {
     let mut resolver = Resolver::new(catalog);
     resolver.resolve(statement)
 }

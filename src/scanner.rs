@@ -58,6 +58,10 @@ pub enum TokenType {
     Delete,
     Alter,
     Eof,
+    Table,
+    Primary,
+    Key,
+    Autoincrement,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -233,6 +237,7 @@ impl<'src> Scanner<'src> {
                         Some(b'n') => self.check_keyword(1, 2, "nd", TokenType::And),
                         Some(b'l') => self.check_keyword(1, 4, "lter", TokenType::Alter),
                         Some(b's') => self.check_keyword(1, 2, "sc", TokenType::Asc),
+                        Some(b'u') => self.check_keyword(1, 12, "utoincrement", TokenType::Autoincrement),
                         _ => TokenType::Identifier,
                     }
                 } else {
@@ -284,6 +289,8 @@ impl<'src> Scanner<'src> {
 
             Some(b'i') => self.check_keyword(1, 4, "nner", TokenType::Inner),
 
+            Some(b'k') => self.check_keyword(1, 2, "ey", TokenType::Key),
+
             Some(b'l') => {
                 if self.current - self.start > 1 {
                     match self.source.get(self.start + 1).map(u8::to_ascii_lowercase) {
@@ -332,11 +339,23 @@ impl<'src> Scanner<'src> {
                 }
             }
 
+            Some(b'p') => self.check_keyword(1, 6, "rimary", TokenType::Primary),
+
             Some(b'r') => self.check_keyword(1, 4, "ight", TokenType::Right),
 
             Some(b's') => self.check_keyword(1, 5, "elect", TokenType::Select),
 
-            Some(b't') => self.check_keyword(1, 3, "rue", TokenType::True),
+            Some(b't') => {
+                if self.current - self.start > 1 {
+                    match self.source.get(self.start + 1).map(u8::to_ascii_lowercase) {
+                        Some(b'a') => self.check_keyword(1, 4, "able", TokenType::Table),
+                        Some(b'r') => self.check_keyword(1, 3, "rue", TokenType::True),
+                        _ => TokenType::Identifier,
+                    }
+                } else {
+                    TokenType::Identifier
+                }
+            }
 
             Some(b'u') => self.check_keyword(1, 5, "pdate", TokenType::Update),
 

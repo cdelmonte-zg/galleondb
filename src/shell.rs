@@ -9,7 +9,7 @@ pub fn run(command: &str, catalog: &Catalog) -> anyhow::Result<()> {
     match command {
         ".dbinfo" => {
             writeln!(&mut message, "database page size: {}", catalog.page_size())?;
-            writeln!(&mut message, "number of tables: {}", catalog.cells_nr())?;
+            writeln!(&mut message, "number of tables: {}", catalog.schema_cell_count())?;
 
             print!("{message}");
             Ok(())

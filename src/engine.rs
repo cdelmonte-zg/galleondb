@@ -28,8 +28,8 @@ impl Engine {
 
     fn execute_sql(&mut self, sql: &str) -> anyhow::Result<()> {
         if let Some(statement) = parser::parse(sql)? {
-            let bound_statement = semantic::analyze(&statement, &mut self.catalog)?;
-            dbg!("{bound_statement}");
+            let bound_statement = semantic::analyze(&statement, &self.catalog)?;
+            println!("Helo {:?}", &bound_statement);
         }
 
         Ok(())

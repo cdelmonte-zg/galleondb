@@ -194,7 +194,7 @@ impl Database {
         //  The cell pointers are arranged in key order with left-most cell (the cell with the smallest key)
         //  first and the right-most cell (the cell with the largest key) last.
         let mut cells: Vec<Cell> = vec![];
-        for index in 0..cells_nr as u16 {
+        for index in 0..cells_nr {
             let mut buf = [0u8; 2];
 
             let pointer_offset = 108 + u64::from(index) * 2;
@@ -275,5 +275,14 @@ impl Database {
         }
 
         bail!("No page root found for table {}", table_name)
+    }
+
+    pub fn leaf_page_cell_count(&mut self, rootpage: &i64, page_size: u32) -> anyhow::Result<u16> {
+        let offset = (*rootpage as u64 - 1) * page_size as u64;
+        let mut page_header = [0u8; 2];
+        self.file.read_exact_at(&mut page_header, offset + 3)?;
+        let num_rows = u16::from_be_bytes([page_header[0], page_header[1]]);
+        
+        Ok(num_rows)
     }
 }

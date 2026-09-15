@@ -16,7 +16,7 @@
 
       "args": [
         "${workspaceFolder}/sample.db",
-        "select * from oranges"
+        "CREATE TABLE pippo (id integer primary, name text not, price decimal null)"
       ],
 
       "cwd": "${workspaceFolder}",
