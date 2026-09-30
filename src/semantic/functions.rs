@@ -5,7 +5,7 @@ use anyhow::bail;
 use crate::semantic::LogicalType;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum FunctionId {
+pub(crate) enum FunctionId {
     AbsReal,
     AbsInteger,
     Count,
@@ -13,31 +13,31 @@ pub enum FunctionId {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum FunctionKind {
+pub(crate) enum FunctionKind {
     Scalar,
     Aggregate,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum ReturnType {
+pub(crate) enum ReturnType {
     Fixed(LogicalType),
     SameAsArgument(usize),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum ArgumentType {
+pub(crate) enum ArgumentType {
     Type(LogicalType),
     Wildcard,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum ParameterType {
+pub(crate) enum ParameterType {
     Type(LogicalType),
     Any,
     Wildcard,
 }
 
-pub struct FunctionDefinition {
+pub(crate) struct FunctionDefinition {
     id: FunctionId,
     name: &'static str,
     parameters: &'static [ParameterType],

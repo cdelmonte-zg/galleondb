@@ -15,29 +15,9 @@ fn main() -> anyhow::Result<()> {
     let command = args[2].trim();
 
     let mut engine = Engine::open(file)?;
-    engine.execute(command)?;
+    let result = engine.execute(command)?;
+
+    println!("{result}");
 
     Ok(())
 }
-
-// match command.as_str() {
-//     "select" => {
-//         let table_name = match expression.last() {
-//             Some(s) => s,
-//             None => return Ok(()),
-//         };
-
-//         let rootpage = get_table_rootpage(&mut file, table_name)?.unwrap();
-
-//         let (page_size, _) = get_db_info(&mut file)?;
-
-//         let offset = (rootpage - 1) * page_size as u64;
-//         let mut page_header = [0u8; 2];
-
-//         file.read_exact_at(&mut page_header, offset + 3)?;
-
-//         let num_rows = u16::from_be_bytes([page_header[0], page_header[1]]);
-
-//         println!("{num_rows}");
-//     }
-// }

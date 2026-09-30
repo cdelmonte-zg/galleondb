@@ -2,6 +2,7 @@ use anyhow::{Error, Result, bail};
 
 use std::fs::File;
 use std::os::unix::fs::FileExt;
+use std::range;
 
 #[derive(Debug)]
 pub struct Database {
@@ -72,6 +73,14 @@ pub struct Cell {
     pub payload_size: usize,
     pub row_id: i64,
     pub record: RowRecord,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct BTreePageHeader {
+    page_type: u8,
+    cell_count: u16,
+    cell_content_area_start: u16,
+    cell_pointer_array_start: u64,
 }
 
 impl Database {
@@ -167,42 +176,88 @@ impl Database {
         Ok(value)
     }
 
-    pub fn get_db_info(&self) -> Result<(u32, u16), Error> {
+    pub fn get_db_info(&self) -> Result<u32, Error> {
         let mut header = [0u8; 100];
-        let mut page_header = [0u8; 8];
-
         self.file.read_exact_at(&mut header, 0)?;
-        self.file.read_exact_at(&mut page_header, 100)?;
 
         // The page size is ;stored at the 16th byte offset, using 2 bytes in big-endian order
         let page_size_encoded = u16::from_be_bytes([header[16], header[17]]);
 
-        let page_size = match page_size_encoded {
-            65_356 => 1,
+        Ok(match page_size_encoded {
+            1 => 65_536,
             n => n as u32,
-        };
-
-        let cells_nr = u16::from_be_bytes([page_header[3], page_header[4]]);
-
-        Ok((page_size, cells_nr))
+        })
     }
 
-    pub fn get_cells(&self) -> Result<(u32, u16, Vec<Cell>), Error> {
-        let (page_size, cells_nr) = self.get_db_info()?;
+    pub fn read_schema_cells(&self) -> Result<(u32, u16, Vec<Cell>), Error> {
+        let page_size = self.get_db_info()?;
 
+        let header = self.read_btree_page_header(1, page_size)?;
+        let cells = self.read_leaf_page_cells(1, page_size)?;
+
+        Ok((page_size, header.cell_count, cells))
+    }
+
+    fn read_btree_page_header(&self, page_number: u64, page_size: u32) -> anyhow::Result<BTreePageHeader>{
+        let page_start = (page_number - 1) * page_size as u64;
+
+        let header_start = if page_number == 1 {
+            page_start + 100
+        } else {
+            page_start
+        };
+        
+        let mut header =  [0u8; 12];
+        self.file.read_exact_at(&mut header, header_start)?;
+
+        // 0x02 → index interior
+        // 0x05 → table interior
+        // 0x0A → index leaf
+        // 0x0D → table leaf    
+        let page_type = header[0];
+
+        let cell_count = u16::from_be_bytes([header[3], header[4]]);
+        let cell_content_area_start = u16::from_be_bytes([header[5], header[6]]);
+        let header_size = match page_type {
+            0x0A | 0x0D => 8,
+            0x02 | 0x05 => 12,
+            _ => bail!("Invalid B-tree page type: {page_type:#04x}"),
+        }; 
+        let cell_pointer_array_start = header_size + header_start;
+
+        Ok(BTreePageHeader { 
+            page_type, 
+            cell_count,
+            cell_content_area_start,
+            cell_pointer_array_start
+        })
+    }
+
+    fn read_leaf_page_cells(&self, page_number: u64, page_size: u32) -> anyhow::Result<Vec<Cell>>{
+        let page_start = (page_number - 1) * page_size as u64;
+        let btree_page_header = self.read_btree_page_header(page_number, page_size)?;
+
+        if btree_page_header.page_type != 0x0D {
+            bail!(
+                "Expected table leaf page, found {:#04x}",
+                btree_page_header.page_type
+            );
+        }
+        
         // The cell pointer array consists of K 2-byte integer offsets to the cell contents.
         //  The cell pointers are arranged in key order with left-most cell (the cell with the smallest key)
         //  first and the right-most cell (the cell with the largest key) last.
         let mut cells: Vec<Cell> = vec![];
-        for index in 0..cells_nr {
+        for index in 0..btree_page_header.cell_count {
             let mut buf = [0u8; 2];
 
-            let pointer_offset = 108 + u64::from(index) * 2;
+            let pointer_offset = btree_page_header.cell_pointer_array_start + u64::from(index) * 2;
+             
             self.file.read_exact_at(&mut buf, pointer_offset)?;
 
             let offset = u16::from_be_bytes(buf);
-
-            let mut pos = offset as usize;
+            let cell_start = page_start + u64::from(offset);
+            let mut pos = cell_start as usize;
 
             let payload_size_in_bytes = usize::try_from(self.read_chunk(&mut pos)?)?;
             let row_id = self.read_chunk(&mut pos)? as i64;
@@ -232,7 +287,7 @@ impl Database {
                 let len = serial_type.payload_size()?;
 
                 let mut value_buf: Vec<u8> = vec![0u8; len];
-                self.file.read_at(&mut value_buf, body_pos as u64)?;
+                self.file.read_exact_at(&mut value_buf, body_pos as u64)?;
 
                 let (value, consumed) = Database::read_value(*serial_type, &value_buf)?;
                 debug_assert_eq!(consumed, len);
@@ -253,11 +308,11 @@ impl Database {
             });
         }
 
-        Ok((page_size, cells_nr, cells))
+        Ok(cells)
     }
 
     pub fn get_table_rootpage(&self, table_name: &str) -> Result<Option<u64>, Error> {
-        let (_, _, cells) = self.get_cells()?;
+        let (_, _, cells) = self.read_schema_cells()?;
 
         for cell in &cells {
             if let [
@@ -277,12 +332,17 @@ impl Database {
         bail!("No page root found for table {}", table_name)
     }
 
-    pub fn leaf_page_cell_count(&mut self, rootpage: &i64, page_size: u32) -> anyhow::Result<u16> {
+    pub fn leaf_page_cell_count(&self, rootpage: &i64, page_size: u32) -> anyhow::Result<u16> {
         let offset = (*rootpage as u64 - 1) * page_size as u64;
-        let mut page_header = [0u8; 2];
+        let mut page_header = [0u8; 4];
         self.file.read_exact_at(&mut page_header, offset + 3)?;
         let num_rows = u16::from_be_bytes([page_header[0], page_header[1]]);
         
         Ok(num_rows)
     }
+
+    pub fn read_table(&self, root_page: u64, page_size: u32) -> anyhow::Result<Vec<Cell>>{
+        self.read_leaf_page_cells(root_page, page_size)
+    }
+    
 }

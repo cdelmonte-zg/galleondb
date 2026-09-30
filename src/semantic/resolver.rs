@@ -1,4 +1,6 @@
-use anyhow::{Ok, bail};
+use std::any::Any;
+
+use anyhow::{Context, Ok, bail};
 
 use crate::{
     parser::{
@@ -7,9 +9,9 @@ use crate::{
         Statement, TableExpr,
     },
     semantic::{
-        Bound_TableExpr, BoundColumn, BoundExpr, BoundExprKind, BoundFunctionArgument,
+        BoundTableExpr, BoundColumn, BoundExpr, BoundExprKind, BoundFunctionArgument,
         BoundFunctionCall, BoundQuery, BoundSelect, BoundStatement, BoundTable,
-        catalog::{Catalog, TableSchema},
+        catalog::{Catalog, TableMetadata, TableSchema},
         functions::{self, ArgumentType, ReturnType},
     },
 };
@@ -29,7 +31,7 @@ pub(crate) struct Scope<'a> {
 pub(crate) struct ScopeRelation<'a> {
     relation_index: usize,
     table_name: String,
-    schema: &'a TableSchema,
+    metadata: &'a TableMetadata,
 }
 
 impl<'a> Resolver<'a> {
@@ -86,18 +88,36 @@ impl<'a> Resolver<'a> {
 
     fn resolve_expression(&self, expression: &Expr) -> anyhow::Result<BoundExpr> {
         match expression {
-            Expr::Column(col) => Ok(BoundExpr {
-                sql_type: super::TypeInfo {
-                    logical_type: super::LogicalType::Text,
-                    nullable: true,
-                },
-                expr: BoundExprKind::Column(BoundColumn {
-                    relation_index: 0,
-                    column_index: 2,
-                }),
-            }),
+            Expr::Column(col) => self.resolve_column(col),
             Expr::FunctionCall(function_call) => Ok(self.resolve_function_call(&function_call)?),
             _ => bail!("not implemented"),
+        }
+    }
+
+    fn resolve_column(&self, column_name: &str) -> anyhow::Result<BoundExpr> {
+        let bound_columns: Vec<BoundExpr> = self.scope.relations.iter().flat_map(| relation| {
+            relation.metadata.schema.columns.iter().enumerate().filter_map(|(column_index, column)| {
+                if column_name.to_ascii_lowercase() == column.name.to_ascii_lowercase() {
+                    Some(BoundExpr {
+                        sql_type: super::TypeInfo {
+                            logical_type: column.logical_type(),
+                            nullable: column.nullable,
+                        },
+                        expr: BoundExprKind::Column(BoundColumn { 
+                            relation_index: relation.relation_index, 
+                            column_index: column_index}),
+                    }) 
+                } else {
+                    None
+                }
+            }            
+        )}
+        ).collect();
+
+        match bound_columns.len() {
+            0 => bail!("No columns found"),
+            1 => Ok(bound_columns.into_iter().next().unwrap()),
+            _ => bail!("Ambiguous column name"),
         }
     }
 
@@ -149,25 +169,26 @@ impl<'a> Resolver<'a> {
         bail!("Not implemented")
     }
 
-    fn resolve_from(&mut self, from: &TableExpr) -> anyhow::Result<Bound_TableExpr> {
+    fn resolve_from(&mut self, from: &TableExpr) -> anyhow::Result<BoundTableExpr> {
         match from {
-            TableExpr::Table(table) => Ok(Bound_TableExpr::Table(self.resolve_table(table)?)),
+            TableExpr::Table(table) => Ok(BoundTableExpr::Table(self.resolve_table(table)?)),
             _ => bail!("To be implemented"),
         }
     }
 
     fn resolve_table(&mut self, table_name: &str) -> anyhow::Result<BoundTable> {
-        let table_metadata = self.catalog.get_table(table_name)?;
+        let table_id = self.catalog.get_table_id(table_name)?;
+        let table_metadata = self.catalog.get_table(table_id)?;
         let relation_index = self.scope.relations.len();
 
         self.scope.relations.push(ScopeRelation {
             relation_index,
             table_name: table_name.to_string(),
-            schema: &table_metadata.schema,
+            metadata: table_metadata,
         });
 
         Ok(BoundTable {
-            relation_index,
+            table_id,
             root_page: table_metadata.root_page as usize,
         })
     }

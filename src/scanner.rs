@@ -237,7 +237,9 @@ impl<'src> Scanner<'src> {
                         Some(b'n') => self.check_keyword(1, 2, "nd", TokenType::And),
                         Some(b'l') => self.check_keyword(1, 4, "lter", TokenType::Alter),
                         Some(b's') => self.check_keyword(1, 2, "sc", TokenType::Asc),
-                        Some(b'u') => self.check_keyword(1, 12, "utoincrement", TokenType::Autoincrement),
+                        Some(b'u') => {
+                            self.check_keyword(1, 12, "utoincrement", TokenType::Autoincrement)
+                        }
                         _ => TokenType::Identifier,
                     }
                 } else {

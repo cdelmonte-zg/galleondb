@@ -3,27 +3,28 @@ use std::fmt::Write;
 
 use crate::semantic::catalog::Catalog;
 
-pub fn run(command: &str, catalog: &Catalog) -> anyhow::Result<()> {
+pub fn run(command: &str, catalog: &Catalog) -> anyhow::Result<Vec<String>> {
     let mut message = String::new();
-
+    let mut result = vec![];
     match command {
         ".dbinfo" => {
             writeln!(&mut message, "database page size: {}", catalog.page_size())?;
-            writeln!(&mut message, "number of tables: {}", catalog.schema_cell_count())?;
-
-            print!("{message}");
-            Ok(())
+            write!(
+                &mut message,
+                "number of tables: {}",
+                catalog.table_names.len()
+            )?;
+            result.push(message);
         }
         ".tables" => {
-            for name in catalog.tables.keys() {
+            for name in catalog.table_names.keys() {
                 if !name.starts_with("sqlite_") {
-                    writeln!(&mut message, "{}", name)?;
+                    result.push(format!("{}", name));
                 }
             }
-
-            print!("{message}");
-            Ok(())
         }
         _ => bail!("I don't know you {}!!", command),
     }
+    
+    Ok(result)
 }

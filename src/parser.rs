@@ -41,7 +41,7 @@ pub(crate) enum ColumnConstraint {
     NotNull,
     Null,
     PrimaryKey,
-    Autoincrement
+    Autoincrement,
 }
 
 #[derive(Debug)]
@@ -188,7 +188,7 @@ impl<'a, 'src> Parser<'a, 'src> {
         self.previous = self.current.clone();
         self.current = self.scanner.scan_token()?;
 
-        println!("{:?}", self.current);
+        // println!("{:?}", self.current);
 
         Ok(())
     }
@@ -348,7 +348,7 @@ impl<'a, 'src> Parser<'a, 'src> {
 
                     constraints.push(ColumnConstraint::NotNull);
                 }
-                
+
                 TokenType::Null => {
                     self.advance()?;
 
@@ -370,7 +370,7 @@ impl<'a, 'src> Parser<'a, 'src> {
                 TokenType::Comma | TokenType::RightParen => {
                     break;
                 }
-                
+
                 _ => bail!(
                     "Unespected token in column constrain {:?}",
                     self.current.t_type

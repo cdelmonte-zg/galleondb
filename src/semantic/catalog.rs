@@ -1,14 +1,21 @@
-use std::{collections::HashMap};
+use std::collections::HashMap;
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 
-use crate::{database::{Database, Value}, semantic::schema_parser::ColumnSchema};
+use crate::{
+    database::{Database, Value},
+    semantic::schema_parser::ColumnSchema,
+};
 
 #[derive(Debug)]
 pub(crate) struct Catalog {
     pub(crate) database: DatabaseMetadata,
-    pub(crate) tables: HashMap<String, TableMetadata>,
+    pub(crate) tables: Vec<TableMetadata>,
+    pub(crate) table_names: HashMap<String, TableId>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct TableId (pub(crate) usize);
 
 #[derive(Debug)]
 pub(crate) struct DatabaseMetadata {
@@ -34,12 +41,12 @@ pub(crate) struct TableStatistics {
 }
 
 impl Catalog {
-    pub fn get_table(&self, table_name: &str) -> anyhow::Result<&TableMetadata> {
-        let table_metadata = self
-            .tables
-            .get(table_name)
-            .with_context(|| format!("Table metadata not found for name {table_name}"))?;
-        Ok(table_metadata)
+    pub fn get_table(&self, table_id: TableId) -> anyhow::Result<&TableMetadata> {
+        self.tables.get(table_id.0).with_context(|| format!("Invalid table id: {}", table_id.0))
+    }
+
+    pub fn get_table_id(&self, name: &str) -> anyhow::Result<TableId> {
+        self.table_names.get(name).copied().with_context(|| format!("table not found: {name}"))
     }
 
     pub fn page_size(&self) -> u32 {
@@ -50,13 +57,12 @@ impl Catalog {
         self.database.schema_cell_count
     }
 
-    pub fn load(database: &mut Database) -> anyhow::Result<Catalog> {
-        let (page_size, schema_cell_count) = database.get_db_info()?;
+    pub fn load(database: &Database) -> anyhow::Result<Catalog> {
+        let (page_size, schema_cell_count, cells) = database.read_schema_cells()?;
 
-        let (_, _, cells) = database.get_cells()?;
-
-        let mut tables = HashMap::new();
-
+        let mut tables = Vec::new();
+        let mut table_names = HashMap::new();
+        
         for cell in &cells {
             if let [
                 Value::Text(object_type),
@@ -68,14 +74,24 @@ impl Catalog {
             {
                 if object_type == "table" && !name.starts_with("sqlite_") {
                     let columns = super::schema_parser::parse_table_schema(sql)?;
+                    
+                    if table_names.contains_key(name) {
+                        bail!("Duplicate table in catalog: {name}")
+                    }
 
-                    tables.entry(name.clone()).or_insert(TableMetadata { 
-                        root_page: *rootpage, 
-                        schema: TableSchema { columns }, 
+                    let table_id = TableId(tables.len());
+
+                    tables.push(TableMetadata {
+                        root_page: *rootpage,
+                        schema: TableSchema { columns },
                         statistics: TableStatistics {
-                            num_rows: Some(database.leaf_page_cell_count(rootpage, page_size)? as u64)
-                        }
+                            num_rows: Some(
+                                database.leaf_page_cell_count(rootpage, page_size)? as u64
+                            ),
+                        },
                     });
+
+                    table_names.entry(name.clone()).or_insert(table_id);
                 }
             }
         }
@@ -85,9 +101,6 @@ impl Catalog {
             page_size,
         };
 
-        Ok(Catalog {
-            database,
-            tables,
-        })
+        Ok(Catalog { database, tables, table_names })
     }
 }
