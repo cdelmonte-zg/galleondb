@@ -1,6 +1,6 @@
 use anyhow::{Context, bail};
 
-use crate::database::Database;
+use crate::database::{Database, Value};
 use crate::semantic::catalog::TableId;
 use crate::semantic::{BoundColumn, BoundExpr, BoundExprKind, BoundFunctionArgument, BoundFunctionCall, BoundTableExpr};
 use crate::semantic::{BoundQuery, BoundSelect, BoundStatement, catalog::Catalog, functions::FunctionId};
@@ -30,23 +30,48 @@ impl <'a>Executor<'a> {
             _ => bail!("Table name is missing."),
         };
 
-        let projection = match select.bound_projections.as_slice() {
-            [projection] => projection,
-            _ => bail!("Multiple projections not implemented")
-        };
-        
-        match &projection.expr {
-            BoundExprKind::FunctionCall(function_call) => self.execute_function(function_call, table_id),
-            BoundExprKind::Column(column) => self.execute_column(table_id, column),
-            _ => bail!("Not Implemented"),
+        let columns: Vec<Vec<Value>> = select.bound_projections.iter().map(|projection: &BoundExpr| {    
+            match &projection.expr {
+                BoundExprKind::FunctionCall(function_call) => { 
+                    self.execute_function(function_call, table_id)
+                }
+                
+                BoundExprKind::Column(column) => {
+                    self.execute_column(table_id, column) 
+                }
+                
+                _ => bail!("Not Implemented"),
+            }
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+        let row_count = columns.first().map(Vec::len).unwrap_or(0);
+
+        if columns.iter().any(|column| column.len() != row_count) {
+            bail!("Projections return different rows")
         }
+
+        let mut rows = Vec::with_capacity(row_count);
+
+        for row_index in 0..row_count {
+            let mut values = Vec::with_capacity(columns.len());
+
+            for column in &columns {
+                values.push(column[row_index].clone());
+            }
+
+            rows.push(Row {values });
+        }
+
+        Ok(rows)
+
     }
 
-    fn execute_column(&self, table_id: TableId, column: &BoundColumn) -> anyhow::Result<Vec<Row>>{
+    fn execute_column(&self, table_id: TableId, column: &BoundColumn) -> anyhow::Result<Vec<Value>>{
         let table_metadata = self.catalog.get_table(table_id)?;
         let cells = self.database.read_table(table_metadata.root_page as u64, self.catalog.page_size())?;
 
-        let mut rows = Vec::new();
+        let mut values = Vec::new();
 
         for cell in cells {
             let value = cell
@@ -56,15 +81,13 @@ impl <'a>Executor<'a> {
                 .context("column index out of range")?
                 .clone();
 
-            rows.push(Row {
-                values: vec![value]
-            })
+            values.push(value)
         }
 
-        Ok(rows)
+        Ok(values)
     }
 
-    fn execute_function(&mut self, function_call: &BoundFunctionCall, table_id: TableId) -> anyhow::Result<Vec<Row>> {   
+    fn execute_function(&mut self, function_call: &BoundFunctionCall, table_id: TableId) -> anyhow::Result<Vec<Value>> {   
         match function_call.function {
             FunctionId::Count => {
                 
@@ -80,7 +103,7 @@ impl <'a>Executor<'a> {
         }    
     }
 
-    fn exec_count_wildcard(&mut self, table_id: TableId) -> anyhow::Result<Vec<Row>>{
+    fn exec_count_wildcard(&mut self, table_id: TableId) -> anyhow::Result<Vec<Value>>{
         let table_metadata = self.catalog.get_table(table_id)?;
         let Some(num_rows) = table_metadata.statistics.num_rows else {
             bail!("Error in statistics. Non number of rows present.")
@@ -89,11 +112,11 @@ impl <'a>Executor<'a> {
         let mut values = Vec::new();
         values.push(crate::database::Value::Integer(num_rows as i64));
 
-        Ok(vec![Row { values }])
+        Ok(values)
     }
 
 
-    fn exec_count_expr(&mut self, table_id: TableId, column: &BoundExpr) -> anyhow::Result<Vec<Row>>{
+    fn exec_count_expr(&mut self, table_id: TableId, column: &BoundExpr) -> anyhow::Result<Vec<Value>>{
         todo!()
     }
 
