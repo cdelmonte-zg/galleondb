@@ -112,9 +112,9 @@ pub(crate) struct UnaryOp {
 
 #[derive(Debug)]
 pub(crate) struct BinaryOp {
-    left: Box<Expr>,
-    op: BinaryOperation,
-    right: Box<Expr>,
+    pub(crate) left: Box<Expr>,
+    pub(crate) op: BinaryOperation,
+    pub(crate) right: Box<Expr>,
 }
 
 #[derive(Debug)]
@@ -129,7 +129,7 @@ pub(crate) enum FunctionArgument {
     Wildcard,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum BinaryOperation {
     Add,
     Divide,

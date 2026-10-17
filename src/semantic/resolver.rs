@@ -1,17 +1,15 @@
-use std::any::Any;
-
-use anyhow::{Context, Ok, bail};
+use anyhow::{Ok, bail};
 
 use crate::{
     parser::{
-        Expr, FunctionArgument, FunctionCall, Query, Select,
+        BinaryOp, BinaryOperation, Expr, FunctionArgument, FunctionCall, Literal, Query, Select,
         SelectionItem::{self, SelectionExpr, Wildcard},
         Statement, TableExpr,
     },
     semantic::{
-        BoundTableExpr, BoundColumn, BoundExpr, BoundExprKind, BoundFunctionArgument,
-        BoundFunctionCall, BoundQuery, BoundSelect, BoundStatement, BoundTable,
-        catalog::{Catalog, TableMetadata, TableSchema},
+        BoundColumn, BoundExpr, BoundExprKind, BoundFunctionArgument, BoundFunctionCall,
+        BoundQuery, BoundSelect, BoundStatement, BoundTable, BoundTableExpr, LogicalType, TypeInfo,
+        catalog::{Catalog, TableMetadata},
         functions::{self, ArgumentType, ReturnType},
     },
 };
@@ -64,10 +62,23 @@ impl<'a> Resolver<'a> {
             None
         };
 
+        let bound_filter = if let Some(filter_stmt) = &select_stmt.filter {
+            let filter = self.resolve_expression(filter_stmt)?;
+
+            if filter.sql_type.logical_type != LogicalType::Boolean {
+                bail!("WHERE clause must evaluate to boolean");
+            }
+
+            Some(filter)
+        } else {
+            None
+        };
+
         let bound_projections = self.resolve_selection_items(&select_stmt.projection)?;
 
         Ok(BoundSelect {
             bound_projections,
+            bound_filter,
             bound_from,
         })
     }
@@ -89,35 +100,147 @@ impl<'a> Resolver<'a> {
     fn resolve_expression(&self, expression: &Expr) -> anyhow::Result<BoundExpr> {
         match expression {
             Expr::Column(col) => self.resolve_column(col),
-            Expr::FunctionCall(function_call) => Ok(self.resolve_function_call(&function_call)?),
+            Expr::Literal(literal) => self.resolve_literal(literal),
+            Expr::BinaryOp(binary_op) => self.resolve_binary_op(binary_op),
+            Expr::FunctionCall(function_call) => self.resolve_function_call(function_call),
             _ => bail!("not implemented"),
         }
     }
 
     fn resolve_column(&self, column_name: &str) -> anyhow::Result<BoundExpr> {
-        let bound_columns: Vec<BoundExpr> = self.scope.relations.iter().flat_map(| relation| {
-            relation.metadata.schema.columns.iter().enumerate().filter_map(|(column_index, column)| {
-                if column_name.to_ascii_lowercase() == column.name.to_ascii_lowercase() {
-                    Some(BoundExpr {
-                        sql_type: super::TypeInfo {
-                            logical_type: column.logical_type(),
-                            nullable: column.nullable,
-                        },
-                        expr: BoundExprKind::Column(BoundColumn { 
-                            relation_index: relation.relation_index, 
-                            column_index: column_index}),
-                    }) 
-                } else {
-                    None
-                }
-            }            
-        )}
-        ).collect();
+        let bound_columns: Vec<BoundExpr> = self
+            .scope
+            .relations
+            .iter()
+            .flat_map(|relation| {
+                relation
+                    .metadata
+                    .schema
+                    .columns
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(column_index, column)| {
+                        if column_name.eq_ignore_ascii_case(&column.name) {
+                            Some(BoundExpr {
+                                sql_type: TypeInfo {
+                                    logical_type: column.logical_type(),
+                                    nullable: column.nullable,
+                                },
+                                expr: BoundExprKind::Column(BoundColumn {
+                                    relation_index: relation.relation_index,
+                                    column_index: column_index,
+                                }),
+                            })
+                        } else {
+                            None
+                        }
+                    })
+            })
+            .collect();
 
         match bound_columns.len() {
             0 => bail!("No columns found"),
             1 => Ok(bound_columns.into_iter().next().unwrap()),
             _ => bail!("Ambiguous column name"),
+        }
+    }
+
+    fn resolve_literal(&self, literal: &Literal) -> anyhow::Result<BoundExpr> {
+        match literal {
+            Literal::String(text) => Ok(BoundExpr {
+                sql_type: TypeInfo {
+                    logical_type: LogicalType::Text,
+                    nullable: false,
+                },
+                expr: BoundExprKind::Literal(Literal::String(text.clone())),
+            }),
+
+            Literal::Integer(integer) => Ok(BoundExpr {
+                sql_type: TypeInfo {
+                    logical_type: LogicalType::Integer,
+                    nullable: false,
+                },
+                expr: BoundExprKind::Literal(Literal::Integer(*integer)),
+            }),
+
+            Literal::Float(float) => Ok(BoundExpr {
+                sql_type: TypeInfo {
+                    logical_type: LogicalType::Real,
+                    nullable: false,
+                },
+                expr: BoundExprKind::Literal(Literal::Float(*float)),
+            }),
+
+            Literal::Null => Ok(BoundExpr {
+                sql_type: TypeInfo {
+                    logical_type: LogicalType::Null,
+                    nullable: true,
+                },
+                expr: BoundExprKind::Literal(Literal::Null),
+            }),
+
+            Literal::Boolean(boolean) => Ok(BoundExpr {
+                sql_type: TypeInfo {
+                    logical_type: LogicalType::Boolean,
+                    nullable: false,
+                },
+                expr: BoundExprKind::Literal(Literal::Boolean(*boolean)),
+            }),
+
+            _ => bail!("Cannot recognize literal"),
+        }
+    }
+
+    fn resolve_binary_op(&self, binary_op: &BinaryOp) -> anyhow::Result<BoundExpr> {
+        let left = self.resolve_expression(&binary_op.left)?;
+        let right = self.resolve_expression(&binary_op.right)?;
+
+        let nullable = left.sql_type.nullable || right.sql_type.nullable;
+        let logical_type = self.resolve_binary_type(&left, &binary_op.op, &right)?;
+
+        let sql_type = TypeInfo {
+            logical_type,
+            nullable,
+        };
+
+        Ok(BoundExpr {
+            sql_type,
+            expr: BoundExprKind::Binary {
+                left: Box::new(left),
+                op: binary_op.op.clone(),
+                right: Box::new(right),
+            },
+        })
+    }
+
+    fn resolve_binary_type(
+        &self,
+        left: &BoundExpr,
+        op: &BinaryOperation,
+        right: &BoundExpr,
+    ) -> anyhow::Result<LogicalType> {
+        match op {
+            super::BinaryOperation::And | super::BinaryOperation::Or => {
+                if left.sql_type.logical_type != LogicalType::Boolean
+                    || right.sql_type.logical_type != LogicalType::Boolean
+                {
+                    bail!("And / Or require boolean operands")
+                }
+
+                Ok(LogicalType::Boolean)
+            }
+
+            super::BinaryOperation::Equal
+            | super::BinaryOperation::NotEqual
+            | super::BinaryOperation::GreaterThan
+            | super::BinaryOperation::GreaterEqualThan
+            | super::BinaryOperation::LessThan
+            | super::BinaryOperation::LessEqualThan => Ok(LogicalType::Boolean),
+
+            super::BinaryOperation::Divide
+            | super::BinaryOperation::Multiply
+            | super::BinaryOperation::Add
+            | super::BinaryOperation::Subtract => Ok(LogicalType::Numeric),
         }
     }
 
@@ -139,9 +262,9 @@ impl<'a> Resolver<'a> {
             }
         }
 
-        let definition = functions::resolve(&function_call.name, &argument_types)?;
+        let function_definition = functions::resolve(&function_call.name, &argument_types)?;
 
-        let logical_type = match definition.return_type() {
+        let logical_type = match function_definition.return_type() {
             ReturnType::Fixed(t) => t,
             ReturnType::SameAsArgument(index) => match argument_types[index] {
                 ArgumentType::Type(t) => t,
@@ -150,12 +273,13 @@ impl<'a> Resolver<'a> {
         };
 
         let bound_expression = BoundExpr {
-            sql_type: super::TypeInfo {
-                logical_type: logical_type,
+            sql_type: TypeInfo {
+                logical_type,
                 nullable: false,
             },
             expr: BoundExprKind::FunctionCall(BoundFunctionCall {
-                function: definition.id(),
+                function: function_definition.id(),
+                function_kind: function_definition.kind(),
                 args: bound_args,
             }),
         };
@@ -189,7 +313,7 @@ impl<'a> Resolver<'a> {
 
         Ok(BoundTable {
             table_id,
-            root_page: table_metadata.root_page as usize,
+            relation_index,
         })
     }
 }

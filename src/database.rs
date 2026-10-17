@@ -2,20 +2,12 @@ use anyhow::{Error, Result, bail};
 
 use std::fs::File;
 use std::os::unix::fs::FileExt;
-use std::range;
+
+use super::value::Value;
 
 #[derive(Debug)]
 pub struct Database {
     pub file: File,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Value {
-    Null,
-    Integer(i64),
-    Float(f64),
-    Blob(Vec<u8>),
-    Text(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -198,7 +190,11 @@ impl Database {
         Ok((page_size, header.cell_count, cells))
     }
 
-    fn read_btree_page_header(&self, page_number: u64, page_size: u32) -> anyhow::Result<BTreePageHeader>{
+    fn read_btree_page_header(
+        &self,
+        page_number: u64,
+        page_size: u32,
+    ) -> anyhow::Result<BTreePageHeader> {
         let page_start = (page_number - 1) * page_size as u64;
 
         let header_start = if page_number == 1 {
@@ -206,14 +202,14 @@ impl Database {
         } else {
             page_start
         };
-        
-        let mut header =  [0u8; 12];
+
+        let mut header = [0u8; 12];
         self.file.read_exact_at(&mut header, header_start)?;
 
         // 0x02 → index interior
         // 0x05 → table interior
         // 0x0A → index leaf
-        // 0x0D → table leaf    
+        // 0x0D → table leaf
         let page_type = header[0];
 
         let cell_count = u16::from_be_bytes([header[3], header[4]]);
@@ -222,18 +218,18 @@ impl Database {
             0x0A | 0x0D => 8,
             0x02 | 0x05 => 12,
             _ => bail!("Invalid B-tree page type: {page_type:#04x}"),
-        }; 
+        };
         let cell_pointer_array_start = header_size + header_start;
 
-        Ok(BTreePageHeader { 
-            page_type, 
+        Ok(BTreePageHeader {
+            page_type,
             cell_count,
             cell_content_area_start,
-            cell_pointer_array_start
+            cell_pointer_array_start,
         })
     }
 
-    fn read_leaf_page_cells(&self, page_number: u64, page_size: u32) -> anyhow::Result<Vec<Cell>>{
+    fn read_leaf_page_cells(&self, page_number: u64, page_size: u32) -> anyhow::Result<Vec<Cell>> {
         let page_start = (page_number - 1) * page_size as u64;
         let btree_page_header = self.read_btree_page_header(page_number, page_size)?;
 
@@ -243,7 +239,7 @@ impl Database {
                 btree_page_header.page_type
             );
         }
-        
+
         // The cell pointer array consists of K 2-byte integer offsets to the cell contents.
         //  The cell pointers are arranged in key order with left-most cell (the cell with the smallest key)
         //  first and the right-most cell (the cell with the largest key) last.
@@ -252,7 +248,7 @@ impl Database {
             let mut buf = [0u8; 2];
 
             let pointer_offset = btree_page_header.cell_pointer_array_start + u64::from(index) * 2;
-             
+
             self.file.read_exact_at(&mut buf, pointer_offset)?;
 
             let offset = u16::from_be_bytes(buf);
@@ -337,12 +333,11 @@ impl Database {
         let mut page_header = [0u8; 4];
         self.file.read_exact_at(&mut page_header, offset + 3)?;
         let num_rows = u16::from_be_bytes([page_header[0], page_header[1]]);
-        
+
         Ok(num_rows)
     }
 
-    pub fn read_table(&self, root_page: u64, page_size: u32) -> anyhow::Result<Vec<Cell>>{
+    pub fn read_table(&self, root_page: u64, page_size: u32) -> anyhow::Result<Vec<Cell>> {
         self.read_leaf_page_cells(root_page, page_size)
     }
-    
 }

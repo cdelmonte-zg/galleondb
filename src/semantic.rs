@@ -1,4 +1,6 @@
-use crate::semantic::{catalog::{Catalog, TableId}, resolver::Resolver};
+use crate::semantic::{
+    catalog::{Catalog, TableId}, functions::FunctionKind, resolver::Resolver,
+};
 
 use super::parser::{BinaryOperation, Literal, Statement, UnaryOperation};
 use functions::FunctionId;
@@ -24,6 +26,7 @@ pub(crate) struct BoundQuery {
 #[derive(Debug)]
 pub(crate) struct BoundSelect {
     pub(crate) bound_projections: Vec<BoundExpr>,
+    pub(crate) bound_filter: Option<BoundExpr>,
     pub(crate) bound_from: Option<BoundTableExpr>,
 }
 
@@ -61,7 +64,7 @@ pub(crate) enum BoundExprKind {
 #[derive(Debug)]
 pub(crate) struct BoundTable {
     pub(crate) table_id: TableId,
-    root_page: usize,
+    pub(crate) relation_index: usize,
 }
 
 #[derive(Debug)]
@@ -73,6 +76,7 @@ pub(crate) struct BoundColumn {
 #[derive(Debug)]
 pub(crate) struct BoundFunctionCall {
     pub(crate) function: FunctionId,
+    pub(crate) function_kind: FunctionKind,
     pub(crate) args: Vec<BoundFunctionArgument>,
 }
 

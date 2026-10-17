@@ -1,12 +1,16 @@
 use anyhow::{Context, bail};
 
-use crate::{parser::{self, ColumnConstraint, ColumnDefinition, DeclaredType, Statement}, semantic::LogicalType};
+use crate::{
+    parser::{self, ColumnConstraint, ColumnDefinition, DeclaredType, Statement},
+    semantic::LogicalType,
+};
 
 #[derive(Debug)]
 pub(crate) struct ColumnSchema {
     pub(crate) name: String,
     pub(crate) affinity: TypeAffinity,
     pub(crate) nullable: bool,
+    pub(crate) is_rowid_alias: bool,
 }
 
 impl ColumnSchema {
@@ -54,10 +58,18 @@ fn column_definition_to_schema(column: ColumnDefinition) -> anyhow::Result<Colum
         )
     });
 
+    let is_rowid_alias = column.constraints.iter().any(|constraint| {
+        matches!(
+            constraint,
+            ColumnConstraint::PrimaryKey
+        )
+    });
+
     Ok(ColumnSchema {
         name: column.name,
         affinity,
         nullable,
+        is_rowid_alias,
     })
 }
 

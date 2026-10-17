@@ -1,11 +1,10 @@
 use std::collections::HashMap;
-
 use anyhow::{Context, bail};
 
-use crate::{
-    database::{Database, Value},
-    semantic::schema_parser::ColumnSchema,
-};
+use crate::database::Database;
+use crate::semantic::schema_parser::ColumnSchema;
+use crate::value::Value;
+
 
 #[derive(Debug)]
 pub(crate) struct Catalog {
@@ -15,7 +14,7 @@ pub(crate) struct Catalog {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct TableId (pub(crate) usize);
+pub(crate) struct TableId(pub(crate) usize);
 
 #[derive(Debug)]
 pub(crate) struct DatabaseMetadata {
@@ -42,11 +41,16 @@ pub(crate) struct TableStatistics {
 
 impl Catalog {
     pub fn get_table(&self, table_id: TableId) -> anyhow::Result<&TableMetadata> {
-        self.tables.get(table_id.0).with_context(|| format!("Invalid table id: {}", table_id.0))
+        self.tables
+            .get(table_id.0)
+            .with_context(|| format!("Invalid table id: {}", table_id.0))
     }
 
     pub fn get_table_id(&self, name: &str) -> anyhow::Result<TableId> {
-        self.table_names.get(name).copied().with_context(|| format!("table not found: {name}"))
+        self.table_names
+            .get(name)
+            .copied()
+            .with_context(|| format!("table not found: {name}"))
     }
 
     pub fn page_size(&self) -> u32 {
@@ -62,7 +66,7 @@ impl Catalog {
 
         let mut tables = Vec::new();
         let mut table_names = HashMap::new();
-        
+
         for cell in &cells {
             if let [
                 Value::Text(object_type),
@@ -74,7 +78,7 @@ impl Catalog {
             {
                 if object_type == "table" && !name.starts_with("sqlite_") {
                     let columns = super::schema_parser::parse_table_schema(sql)?;
-                    
+
                     if table_names.contains_key(name) {
                         bail!("Duplicate table in catalog: {name}")
                     }
@@ -101,6 +105,10 @@ impl Catalog {
             page_size,
         };
 
-        Ok(Catalog { database, tables, table_names })
+        Ok(Catalog {
+            database,
+            tables,
+            table_names,
+        })
     }
 }
