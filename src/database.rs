@@ -1,5 +1,6 @@
-use anyhow::{Error, Result, bail};
+use anyhow::{Context, Error, Result, bail};
 
+use std::any;
 use std::fs::File;
 use std::os::unix::fs::FileExt;
 
@@ -73,6 +74,7 @@ struct BTreePageHeader {
     cell_count: u16,
     cell_content_area_start: u16,
     cell_pointer_array_start: u64,
+    right_most_child: Option<u32>,
 }
 
 impl Database {
@@ -181,13 +183,35 @@ impl Database {
         })
     }
 
-    pub fn read_schema_cells(&self) -> Result<(u32, u16, Vec<Cell>), Error> {
+    pub fn read_schema_cells(&self) -> Result<(u32, usize, Vec<Cell>), Error> {
         let page_size = self.get_db_info()?;
+        let cells = self.read_table(1, page_size)?;
 
-        let header = self.read_btree_page_header(1, page_size)?;
-        let cells = self.read_leaf_page_cells(1, page_size)?;
+        Ok((page_size, cells.len(), cells))
+    }
 
-        Ok((page_size, header.cell_count, cells))
+    pub fn read_table(&self, page_number: u64, page_size: u32) -> anyhow::Result<Vec<Cell>>{
+        let header = self.read_btree_page_header(page_number, page_size)?;
+        
+        match header.page_type {
+            0x0D => {
+                self.read_leaf_page_cells(page_number, page_size)
+            }
+
+            0x05 => {
+                let children = self.read_table_interior_children(page_number, page_size)?;
+
+                let mut cells = Vec::new();
+
+                for child_page in children {
+                    cells.extend(self.read_table(child_page, page_size)?);
+                }
+
+                Ok(cells)
+            }
+
+            _ => bail!("Page type {} not yet implemented", header.page_type)
+        }                
     }
 
     fn read_btree_page_header(
@@ -214,9 +238,9 @@ impl Database {
 
         let cell_count = u16::from_be_bytes([header[3], header[4]]);
         let cell_content_area_start = u16::from_be_bytes([header[5], header[6]]);
-        let header_size = match page_type {
-            0x0A | 0x0D => 8,
-            0x02 | 0x05 => 12,
+        let (header_size, right_most_child)  = match page_type {
+            0x0A | 0x0D => (8, None),
+            0x02 | 0x05 => (12, Some(u32::from_be_bytes([header[8], header[9], header[10], header[11]]))),
             _ => bail!("Invalid B-tree page type: {page_type:#04x}"),
         };
         let cell_pointer_array_start = header_size + header_start;
@@ -226,6 +250,7 @@ impl Database {
             cell_count,
             cell_content_area_start,
             cell_pointer_array_start,
+            right_most_child,
         })
     }
 
@@ -307,6 +332,39 @@ impl Database {
         Ok(cells)
     }
 
+    pub fn read_table_interior_children(&self, page_number: u64, page_size: u32) -> Result<Vec<u64>> {
+        let page_start = (page_number - 1) * page_size as u64;
+        let header = self.read_btree_page_header(page_number, page_size)?;
+
+        if header.page_type != 0x05 {
+            bail!(
+                "Expected table interior children node, found {:#04x}",
+                header.page_type
+            );
+        }
+        
+        let mut children = Vec::new();
+        for index in 0..header.cell_count {
+            let pointer_offset = header.cell_pointer_array_start + u64::from(index) * 2;
+            
+            let mut buf = [0u8; 2];
+            self.file.read_exact_at(&mut buf, pointer_offset)?;
+            let cell_offset = u16::from_be_bytes(buf);
+            let cell_start = page_start + u64::from(cell_offset);
+
+            let mut buf = [0u8; 4];
+            self.file.read_exact_at(&mut buf, cell_start)?;
+            let child = u32::from_be_bytes(buf);
+
+            children.push(u64::from(child));    
+        }
+
+        children.push(u64::from(header.right_most_child.context("Missing right most child")?));
+
+        Ok(children)
+    }
+
+
     pub fn get_table_rootpage(&self, table_name: &str) -> Result<Option<u64>, Error> {
         let (_, _, cells) = self.read_schema_cells()?;
 
@@ -337,7 +395,4 @@ impl Database {
         Ok(num_rows)
     }
 
-    pub fn read_table(&self, root_page: u64, page_size: u32) -> anyhow::Result<Vec<Cell>> {
-        self.read_leaf_page_cells(root_page, page_size)
-    }
 }

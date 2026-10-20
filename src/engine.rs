@@ -5,7 +5,7 @@ use crate::execution::ExecutionResult;
 use crate::execution::executor::Executor;
 use crate::logical_plan::LogicalPlanner;
 use crate::semantic::catalog::Catalog;
-use crate::{logical_plan, parser, semantic, shell};
+use crate::{parser, semantic, shell};
 use std::fs::File;
 
 pub struct Engine {
@@ -39,7 +39,7 @@ impl Engine {
 
             let logical_plan = LogicalPlanner::plan(bound_statement)?;
 
-            let mut executor = Executor {
+            let executor = Executor {
                 catalog: &self.catalog,
                 database: &mut self.database,
             };

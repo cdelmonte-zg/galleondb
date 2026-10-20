@@ -15,8 +15,8 @@
       },
 
       "args": [
-        "${workspaceFolder}/sample.db",
-        "SELECT name FROM apples"
+        "${workspaceFolder}/superheroes.db",
+        "SELECT name FROM superheroes"
       ],
 
       "cwd": "${workspaceFolder}",

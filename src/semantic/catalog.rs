@@ -18,7 +18,7 @@ pub(crate) struct TableId(pub(crate) usize);
 
 #[derive(Debug)]
 pub(crate) struct DatabaseMetadata {
-    pub(crate) schema_cell_count: u16,
+    pub(crate) schema_cell_count: usize,
     pub(crate) page_size: u32,
 }
 
@@ -57,7 +57,7 @@ impl Catalog {
         self.database.page_size
     }
 
-    pub fn schema_cell_count(&self) -> u16 {
+    pub fn schema_cell_count(&self) -> usize {
         self.database.schema_cell_count
     }
 

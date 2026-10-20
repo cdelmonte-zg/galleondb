@@ -1,9 +1,5 @@
-use std::io::ErrorKind::TimedOut;
 
-use crate::{
-    scanner::{Scanner, Token, TokenType},
-    semantic::LogicalType,
-};
+use crate::scanner::{Scanner, Token, TokenType};
 use anyhow::bail;
 
 #[derive(Debug)]
@@ -230,7 +226,7 @@ impl<'a, 'src> Parser<'a, 'src> {
                 self.advance()?;
                 self.expect(TokenType::Table)?;
 
-                if self.current.t_type != TokenType::Identifier {
+                if !matches!(self.current.t_type, TokenType::Identifier | TokenType::QuotedIdentifier) {
                     bail!("Expected table name.");
                 }
 
@@ -451,7 +447,7 @@ impl<'a, 'src> Parser<'a, 'src> {
         }
         self.advance()?;
 
-        if self.current.t_type != TokenType::Identifier {
+        if !matches!(self.current.t_type, TokenType::Identifier | TokenType::QuotedIdentifier) {
             bail!("Expected table name.");
         }
 
