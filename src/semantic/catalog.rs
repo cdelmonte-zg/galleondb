@@ -1,20 +1,24 @@
-use std::collections::HashMap;
 use anyhow::{Context, bail};
+use std::collections::HashMap;
 
 use crate::database::Database;
 use crate::semantic::schema_parser::ColumnSchema;
 use crate::value::Value;
-
 
 #[derive(Debug)]
 pub(crate) struct Catalog {
     pub(crate) database: DatabaseMetadata,
     pub(crate) tables: Vec<TableMetadata>,
     pub(crate) table_names: HashMap<String, TableId>,
+    pub(crate) indexes: Vec<IndexMetadata>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct TableId(pub(crate) usize);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ColumnIndex(pub(crate) usize);
+
 
 #[derive(Debug)]
 pub(crate) struct DatabaseMetadata {
@@ -37,6 +41,19 @@ pub(crate) struct TableSchema {
 #[derive(Debug, Default)]
 pub(crate) struct TableStatistics {
     pub(crate) num_rows: Option<u64>,
+}
+
+#[derive(Debug)]
+pub(crate) struct IndexMetadata {
+    pub(crate) name: String,
+    pub(crate) table_id: TableId,
+    pub(crate) root_page: u64,
+    pub(crate) keys: Vec<IndexKeyMetadata>,
+}
+
+#[derive(Debug)]
+pub(crate) struct IndexKeyMetadata {
+    pub(crate) column_index: ColumnIndex,
 }
 
 impl Catalog {
@@ -66,36 +83,77 @@ impl Catalog {
 
         let mut tables = Vec::new();
         let mut table_names = HashMap::new();
+        let mut indexes = Vec::new();
 
         for cell in &cells {
             if let [
                 Value::Text(object_type),
                 Value::Text(name),
-                Value::Text(_tbl_name),
+                Value::Text(tbl_name),
                 Value::Integer(rootpage),
                 Value::Text(sql),
             ] = cell.record.body.as_slice()
             {
-                if object_type == "table" && !name.starts_with("sqlite_") {
-                    let columns = super::schema_parser::parse_table_schema(sql)?;
+                if !name.starts_with("sqlite_") {
+                    match object_type.as_str() {
+                        "table" => {
+                            let columns = super::schema_parser::parse_table_schema(sql)?;
 
-                    if table_names.contains_key(name) {
-                        bail!("Duplicate table in catalog: {name}")
+                            if table_names.contains_key(name) {
+                                bail!("Duplicate table in catalog: {name}")
+                            }
+
+                            let table_id = TableId(tables.len());
+
+                            tables.push(TableMetadata {
+                                root_page: *rootpage,
+                                schema: TableSchema { columns },
+                                statistics: TableStatistics {
+                                    num_rows: Some(
+                                        database.leaf_page_cell_count(rootpage, page_size)? as u64,
+                                    ),
+                                },
+                            });
+
+                            table_names.entry(name.clone()).or_insert(table_id);
+                        }
+
+                        "index" => {
+                            let index = super::schema_parser::parse_index(sql)?;
+
+                            let table_id = *table_names
+                                .get(tbl_name)
+                                .with_context(|| format!("Table not found for index: {tbl_name}"))?;
+
+                            let name = index.name;
+
+                            let keys = index.keys.iter().map(|key| {    
+                                let table = &tables[table_id.0];
+                                    
+                                let column_index = table.schema.columns
+                                    .iter()
+                                    .position(|column| column.name == key.column)
+                                    .with_context(|| format!(
+                                        "Column {} not found in table {}",
+                                        key.column, tbl_name
+                                    ))?;
+
+                                Ok(IndexKeyMetadata {
+                                    column_index: ColumnIndex(column_index) 
+                                })
+                            }).collect::<anyhow::Result<Vec<_>>>()?;
+
+                            let index_metadata = IndexMetadata {
+                                name,
+                                table_id: table_id,
+                                root_page: u64::try_from(*rootpage)?,
+                                keys,
+                            };
+
+                            indexes.push(index_metadata);
+                        }
+                        _ => {},
                     }
-
-                    let table_id = TableId(tables.len());
-
-                    tables.push(TableMetadata {
-                        root_page: *rootpage,
-                        schema: TableSchema { columns },
-                        statistics: TableStatistics {
-                            num_rows: Some(
-                                database.leaf_page_cell_count(rootpage, page_size)? as u64
-                            ),
-                        },
-                    });
-
-                    table_names.entry(name.clone()).or_insert(table_id);
                 }
             }
         }
@@ -109,6 +167,19 @@ impl Catalog {
             database,
             tables,
             table_names,
+            indexes,
         })
     }
+
+    pub(crate) fn find_index(&self, table_id: TableId, column_index: ColumnIndex) -> Option<&IndexMetadata> {
+        self.indexes
+            .iter()
+            .find(|index| 
+                index.table_id == table_id 
+                    && index.keys
+                        .first()
+                        .is_some_and(|key| 
+                            key.column_index == column_index))
+    }
+
 }

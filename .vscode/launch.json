@@ -15,8 +15,8 @@
       },
 
       "args": [
-        "${workspaceFolder}/superheroes.db",
-        "SELECT name FROM superheroes"
+        "${workspaceFolder}/companies.db",
+        "SELECT id, name FROM companies WHERE country = 'eritrea';"
       ],
 
       "cwd": "${workspaceFolder}",

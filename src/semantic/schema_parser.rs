@@ -1,8 +1,7 @@
 use anyhow::{Context, bail};
 
 use crate::{
-    parser::{self, ColumnConstraint, ColumnDefinition, DeclaredType, Statement},
-    semantic::LogicalType,
+    parser::{self, ColumnConstraint, ColumnDefinition, CreateIndex, DeclaredType, Statement}, semantic::LogicalType,
 };
 
 #[derive(Debug)]
@@ -46,6 +45,16 @@ pub fn parse_table_schema(sql: &str) -> anyhow::Result<Vec<ColumnSchema>> {
         .into_iter()
         .map(column_definition_to_schema)
         .collect()
+}
+
+pub(crate) fn parse_index(sql: &str) -> anyhow::Result<CreateIndex> {
+    let statement = parser::parse(sql)?.context("Expected CREATE INDEX statement")?;
+    
+    let Statement::CreateIndex(create_index) = statement else {
+        bail!("Expected CREATE INDEX statement")
+    };
+
+    Ok(create_index)
 }
 
 fn column_definition_to_schema(column: ColumnDefinition) -> anyhow::Result<ColumnSchema> {

@@ -1,4 +1,3 @@
-
 use crate::scanner::{Scanner, Token, TokenType};
 use anyhow::bail;
 
@@ -6,6 +5,7 @@ use anyhow::bail;
 pub(crate) enum Statement {
     Query(Query),
     CreateTable(CreateTable),
+    CreateIndex(CreateIndex),
     // Alter,
     // Insert,
     // Update,
@@ -17,6 +17,25 @@ pub(crate) enum Statement {
 pub(crate) struct CreateTable {
     pub(crate) name: String,
     pub(crate) columns: Vec<ColumnDefinition>,
+}
+
+#[derive(Debug)]
+pub(crate) struct CreateIndex {
+    pub(crate) name: String,
+    pub(crate) table_name: String,
+    pub(crate) keys: Vec<IndexKey>,
+}
+
+#[derive(Debug)]
+pub(crate) struct IndexKey {
+    pub(crate) column: String,
+    pub(crate) order: Option<IndexOrder>,
+}
+
+#[derive(Debug)]
+pub(crate) enum IndexOrder {
+    Asc,
+    Desc,
 }
 
 #[derive(Debug)]
@@ -224,18 +243,62 @@ impl<'a, 'src> Parser<'a, 'src> {
 
             TokenType::Create => {
                 self.advance()?;
-                self.expect(TokenType::Table)?;
 
-                if !matches!(self.current.t_type, TokenType::Identifier | TokenType::QuotedIdentifier) {
-                    bail!("Expected table name.");
+                match self.current.t_type {
+                    TokenType::Table => {
+                        self.advance()?;
+
+                        if !matches!(
+                            self.current.t_type,
+                            TokenType::Identifier | TokenType::QuotedIdentifier
+                        ) {
+                            bail!("Expected table name.");
+                        }
+
+                        let name = self.current_identifier_value()?;
+                        self.advance()?;
+
+                        let columns = self.parse_column_definitions()?;
+
+                        Statement::CreateTable(CreateTable { name, columns })
+                    }
+
+                    TokenType::Index => {
+                        self.advance()?;
+
+                        if !matches!(
+                            self.current.t_type,
+                            TokenType::Identifier | TokenType::QuotedIdentifier
+                        ) {
+                            bail!("Expected index name.");
+                        }
+
+                        let name = self.current_identifier_value()?;
+                        self.advance()?;
+
+                        self.expect(TokenType::On)?;
+
+                        if !matches!(
+                            self.current.t_type,
+                            TokenType::Identifier | TokenType::QuotedIdentifier
+                        ) {
+                            bail!("Expected table name.");
+                        }
+
+                        let table_name = self.current_identifier_value()?;
+                        self.advance()?;
+
+                        let keys = self.parse_index_keys()?;
+
+                        Statement::CreateIndex(CreateIndex {
+                            name,
+                            table_name,
+                            keys,
+                        })
+                    }
+
+                    _ => bail!("Index or table missing in create statement."),
                 }
-
-                let name = self.current_value()?.to_string();
-                self.advance()?;
-
-                let columns = self.parse_column_definitions()?;
-
-                Statement::CreateTable(CreateTable { name, columns })
             }
 
             _ => bail!("Unexpected token {:?}", self.current.t_type),
@@ -250,6 +313,47 @@ impl<'a, 'src> Parser<'a, 'src> {
         }
 
         Ok(Some(statement))
+    }
+
+    fn parse_index_keys(&mut self) -> anyhow::Result<Vec<IndexKey>> {
+        self.expect(TokenType::LeftParen)?;
+
+        let mut index_keys = vec![];
+        index_keys.push(self.parse_index_key()?);
+
+        while self.current.t_type == TokenType::Comma {
+            self.advance()?;
+
+            index_keys.push(self.parse_index_key()?);
+        }
+
+        self.expect(TokenType::RightParen)?;
+
+        Ok(index_keys)
+    }
+
+    fn parse_index_key(&mut self) -> anyhow::Result<IndexKey> {
+        if !matches!(
+            self.current.t_type,
+            TokenType::Identifier | TokenType::QuotedIdentifier
+        ) {
+            bail!("Expected index column name.");
+        }
+
+        let column = self.current_value()?.to_string();
+        self.advance()?;
+
+        let order = if self.current.t_type == TokenType::Asc {
+            self.advance()?;
+            Some(IndexOrder::Asc) 
+        } else if self.current.t_type == TokenType::Desc {
+            self.advance()?;
+            Some(IndexOrder::Desc)
+        }else {
+            None
+        };
+
+        Ok(IndexKey { column, order })
     }
 
     fn parse_column_definitions(&mut self) -> anyhow::Result<Vec<ColumnDefinition>> {
@@ -270,7 +374,10 @@ impl<'a, 'src> Parser<'a, 'src> {
     }
 
     fn parse_column_definition(&mut self) -> anyhow::Result<ColumnDefinition> {
-        if self.current.t_type != TokenType::Identifier {
+        if !matches!(
+            self.current.t_type,
+            TokenType::Identifier | TokenType::QuotedIdentifier
+        ) {
             bail!("Expected column name.");
         }
         let name = self.current_value()?.to_string();
@@ -447,7 +554,10 @@ impl<'a, 'src> Parser<'a, 'src> {
         }
         self.advance()?;
 
-        if !matches!(self.current.t_type, TokenType::Identifier | TokenType::QuotedIdentifier) {
+        if !matches!(
+            self.current.t_type,
+            TokenType::Identifier | TokenType::QuotedIdentifier
+        ) {
             bail!("Expected table name.");
         }
 
@@ -839,6 +949,19 @@ impl<'a, 'src> Parser<'a, 'src> {
         self.advance()?;
         Ok(Some(self.parse_expression()?))
     }
+
+    fn current_identifier_value(&self) -> anyhow::Result<String> {
+        let value = self.current_value()?;
+
+        match self.current.t_type {
+            TokenType::QuotedIdentifier => {
+                let inner = &value[1..value.len() - 1];
+                Ok(inner.replace("\"\"", "\""))
+            }
+            TokenType::Identifier => Ok(value.to_string()),
+            _ => bail!("Expected identifier"),
+        }
+    }
 }
 
 pub fn parse(source: &str) -> anyhow::Result<Option<Statement>> {
@@ -849,3 +972,4 @@ pub fn parse(source: &str) -> anyhow::Result<Option<Statement>> {
 
     Ok(statement)
 }
+

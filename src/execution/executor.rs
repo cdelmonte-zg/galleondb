@@ -1,10 +1,10 @@
 use anyhow::{Context, bail};
 
 use super::Row;
-use crate::database::Database;
+use crate::database::{Cell, Database};
 use crate::logical_plan::LogicalPlan;
 use crate::parser::{BinaryOperation, Literal};
-use crate::semantic::catalog::TableId;
+use crate::semantic::catalog::{TableId, TableMetadata};
 use crate::semantic::functions::FunctionKind;
 use crate::semantic::{
     BoundColumn, BoundExpr, BoundExprKind, BoundFunctionArgument, BoundFunctionCall,
@@ -26,6 +26,12 @@ impl<'a> Executor<'a> {
             } => self.execute_scan(*table_id),
 
             LogicalPlan::Filter { input, predicate } => {
+                if let LogicalPlan::Scan { table_id, .. } = input.as_ref() {
+                    if let Some(rows) = self.try_index_lookup(*table_id, predicate)? {
+                        return Ok(rows);
+                    }
+                }
+
                 let input_rows = self.execute_plan(input)?;
                 let mut output = Vec::with_capacity(input_rows.len());
 
@@ -62,6 +68,66 @@ impl<'a> Executor<'a> {
         }
     }
 
+    fn try_index_lookup(
+        &self,
+        table_id: TableId,
+        predicate: &BoundExpr,
+    ) -> anyhow::Result<Option<Vec<Row>>> {
+        let BoundExprKind::Binary { left, right, op } = &predicate.expr else {
+            return Ok(None);
+        };
+
+        if !matches!(op, BinaryOperation::Equal) {
+            return Ok(None);
+        }
+
+        let (column, literal) = match (&left.expr, &right.expr) {
+            (BoundExprKind::Column(column), BoundExprKind::Literal(literal)) => (column, literal),
+            (BoundExprKind::Literal(literal), BoundExprKind::Column(column)) => (column, literal),
+            _ => return Ok(None),
+        };
+
+        let search_value = self.evaluate_literal(literal)?;
+
+        let Some(index) = self.catalog.find_index(
+            table_id,
+            crate::semantic::catalog::ColumnIndex(column.column_index),
+        ) else {
+            return Ok(None);
+        };
+
+        let rows = self.execute_index_lookup(table_id, index.root_page, &search_value)?;
+
+        Ok(Some(rows))
+    }
+
+    fn execute_index_lookup(
+        &self,
+        table_id: TableId,
+        index_root_page: u64,
+        search_value: &Value,
+    ) -> anyhow::Result<Vec<Row>> {
+        let table_metadata = self.catalog.get_table(table_id)?;
+
+        let row_ids =
+            self.database
+                .lookup_index(index_root_page, self.catalog.page_size(), search_value)?;
+
+        let mut rows = Vec::with_capacity(row_ids.len());
+
+        for row_id in row_ids {
+            let cell = self.database.read_table_row(
+                table_metadata.root_page as u64,
+                self.catalog.page_size(),
+                row_id,
+            )?;
+
+            rows.push(self.cell_to_row(table_metadata, &cell)?);
+        }
+
+        Ok(rows)
+    }
+
     fn execute_scan(&self, table_id: TableId) -> anyhow::Result<Vec<Row>> {
         let table_metadata = self.catalog.get_table(table_id)?;
         let cells = self
@@ -71,23 +137,7 @@ impl<'a> Executor<'a> {
         let mut rows = Vec::with_capacity(cells.len());
 
         for cell in cells {
-            let mut values = Vec::with_capacity(table_metadata.schema.columns.len());
-
-            for (index, column) in table_metadata.schema.columns.iter().enumerate() {
-                if column.is_rowid_alias {
-                    values.push(Value::Integer(cell.row_id))
-                } else {
-                    values.push(
-                        cell.record
-                            .body
-                            .get(index)
-                            .context("Column index out of range")?
-                            .clone(),
-                    )
-                }
-            }
-
-            rows.push(Row { values })
+            rows.push(self.cell_to_row(table_metadata, &cell)?);
         }
 
         Ok(rows)
@@ -103,9 +153,7 @@ impl<'a> Executor<'a> {
         let mut values = Vec::with_capacity(expressions.len());
 
         for expression in expressions {
-            values.push(
-                self.evaluate_aggregates(expression, &input_rows)?
-            );
+            values.push(self.evaluate_aggregates(expression, &input_rows)?);
         }
 
         Ok(vec![Row { values }])
@@ -189,13 +237,31 @@ impl<'a> Executor<'a> {
         }
 
         match op {
-            BinaryOperation::Equal => {
-                Ok(Value::Boolean(left == right))
-            }
+            BinaryOperation::Equal => Ok(Value::Boolean(left == right)),
 
             BinaryOperation::NotEqual => Ok(Value::Boolean(left != right)),
 
             _ => bail!("Not implemented"),
         }
+    }
+
+    fn cell_to_row(&self, table_metadata: &TableMetadata, cell: &Cell) -> anyhow::Result<Row> {
+        let mut values = Vec::with_capacity(table_metadata.schema.columns.len());
+
+        for (index, column) in table_metadata.schema.columns.iter().enumerate() {
+            if column.is_rowid_alias {
+                values.push(Value::Integer(cell.row_id))
+            } else {
+                values.push(
+                    cell.record
+                        .body
+                        .get(index)
+                        .context("Column index out of range")?
+                        .clone(),
+                )
+            }
+        }
+
+        Ok(Row { values })
     }
 }

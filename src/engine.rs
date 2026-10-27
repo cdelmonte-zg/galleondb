@@ -14,12 +14,10 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn open(file: File) -> anyhow::Result<Self> {
+    pub fn open(file: File) -> anyhow::Result<Self> {   
         let database = Database { file };
         let catalog = Catalog::load(&database)?;
-
-        // dbg!("{:?}", &catalog);
-
+        
         Ok(Self { database, catalog })
     }
 

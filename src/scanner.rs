@@ -1,5 +1,7 @@
 use core::fmt;
 
+use crate::scanner::TokenType::Index;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TokenType {
     LeftParen,
@@ -43,6 +45,7 @@ pub enum TokenType {
     Select,
     From,
     Inner,
+    Index,
     Left,
     Right,
     Join,
@@ -289,7 +292,27 @@ impl<'src> Scanner<'src> {
 
             Some(b'j') => self.check_keyword(1, 3, "oin", TokenType::Join),
 
-            Some(b'i') => self.check_keyword(1, 4, "nner", TokenType::Inner),
+            Some(b'i') => {
+                if self.current - self.start > 1 {
+                    match self.source.get(self.start + 1).map(u8::to_ascii_lowercase) {
+                        Some(b'n') => {
+                            if self.current - self.start > 2 {
+                                match self.source.get(self.start + 2).map(u8::to_ascii_lowercase) {
+                                   Some(b'd') => self.check_keyword(1, 4, "ndex", TokenType::Index),
+                                   Some(b'n') => self.check_keyword(1, 4, "nner", TokenType::Inner),
+                                   _ => TokenType::Identifier, 
+                                }
+                            } else {
+                                TokenType::Identifier
+                            }
+                        }
+
+                        _ => TokenType::Identifier
+                    }       
+                } else {
+                    TokenType::Identifier
+                }
+            }
 
             Some(b'k') => self.check_keyword(1, 2, "ey", TokenType::Key),
 
