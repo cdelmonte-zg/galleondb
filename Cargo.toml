@@ -1,7 +1,7 @@
 [package]
-name = "codecrafters-sqlite"
+name = "galleondb"
 version = "0.1.0"
-authors = ["Codecrafters <hello@codecrafters.io>"]
+authors = ["Christian Del Monte<christian.del-monte@posteo.de>"]
 edition = "2024"
 rust-version = "1.96"
 

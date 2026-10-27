@@ -11,3 +11,8 @@ target/
 
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
+
+# Editor and debugger files
+.gdb_history
+.vscode/
+*.code-workspace

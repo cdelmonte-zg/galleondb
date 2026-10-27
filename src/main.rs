@@ -1,5 +1,5 @@
 use anyhow::bail;
-use codecrafters_sqlite::engine::Engine;
+use galleondb::engine::Engine;
 use std::fs::File;
 
 fn main() -> anyhow::Result<()> {
