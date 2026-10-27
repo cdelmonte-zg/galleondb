@@ -102,8 +102,7 @@ impl Catalog {
                 Value::Integer(rootpage),
                 Value::Text(sql),
             ] = cell.record.body.as_slice()
-            {
-                if !name.starts_with("sqlite_") {
+                && !name.starts_with("sqlite_") {
                     match object_type.as_str() {
                         "table" => {
                             let columns = super::schema_parser::parse_table_schema(sql)?;
@@ -154,7 +153,7 @@ impl Catalog {
 
                             let index_metadata = IndexMetadata {
                                 name,
-                                table_id: table_id,
+                                table_id,
                                 root_page: u64::try_from(*rootpage)?,
                                 keys,
                             };
@@ -164,7 +163,6 @@ impl Catalog {
                         _ => {},
                     }
                 }
-            }
         }
 
         let database = DatabaseMetadata {

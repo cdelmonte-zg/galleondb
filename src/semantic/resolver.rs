@@ -130,7 +130,7 @@ impl<'a> Resolver<'a> {
                                 },
                                 expr: BoundExprKind::Column(BoundColumn {
                                     relation_index: relation.relation_index,
-                                    column_index: column_index,
+                                    column_index,
                                 }),
                             })
                         } else {

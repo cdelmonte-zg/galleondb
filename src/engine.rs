@@ -24,7 +24,7 @@ impl Engine {
     pub fn execute(&mut self, command: &str) -> anyhow::Result<ExecutionResult> {
         match command {
             ".dbinfo" | ".tables" => {
-                Ok(ExecutionResult::Shell(shell::run(&command, &self.catalog)?))
+                Ok(ExecutionResult::Shell(shell::run(command, &self.catalog)?))
             }
             _ => self.execute_sql(command),
         }

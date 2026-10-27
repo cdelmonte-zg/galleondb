@@ -104,11 +104,9 @@ struct IndexRecord {
 
 impl Database {
     fn read_varint(buf: &[u8]) -> (u64, usize) {
-        let mut result = 0 as u64;
+        let mut result = 0_u64;
 
-        for i in 0..9 {
-            let byte = buf[i];
-
+        for (i, &byte) in buf.iter().enumerate() {
             //ninth byte is taken as it is
             if i == 8 {
                 result = (result << 8) | byte as u64;

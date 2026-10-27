@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::scanner::{Scanner, Token, TokenType};
 use anyhow::bail;
 
@@ -907,14 +908,6 @@ impl<'a, 'src> Parser<'a, 'src> {
         let source = self.scanner.source;
 
         let value = &source[self.current.start..(self.current.start + self.current.length)];
-
-        str::from_utf8(value)
-    }
-
-    fn previous_value(&self) -> Result<&str, std::str::Utf8Error> {
-        let source = self.scanner.source;
-
-        let value = &source[self.previous.start..(self.previous.start + self.previous.length)];
 
         str::from_utf8(value)
     }

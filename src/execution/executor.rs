@@ -26,11 +26,10 @@ impl<'a> Executor<'a> {
             } => self.execute_scan(*table_id),
 
             LogicalPlan::Filter { input, predicate } => {
-                if let LogicalPlan::Scan { table_id, .. } = input.as_ref() {
-                    if let Some(rows) = self.try_index_lookup(*table_id, predicate)? {
+                if let LogicalPlan::Scan { table_id, .. } = input.as_ref()
+                    && let Some(rows) = self.try_index_lookup(*table_id, predicate)? {
                         return Ok(rows);
                     }
-                }
 
                 let input_rows = self.execute_plan(input)?;
                 let mut output = Vec::with_capacity(input_rows.len());

@@ -41,12 +41,14 @@ pub(crate) struct BoundExpr {
     pub(crate) expr: BoundExprKind,
 }
 
+
 #[derive(Debug)]
 pub(crate) enum BoundExprKind {
     Literal(Literal),
 
     Column(BoundColumn),
 
+    #[allow(dead_code)]
     Unary {
         op: UnaryOperation,
         operand: Box<BoundExpr>,
