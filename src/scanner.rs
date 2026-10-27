@@ -1,7 +1,5 @@
 use core::fmt;
 
-use crate::scanner::TokenType::Index;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TokenType {
     LeftParen,

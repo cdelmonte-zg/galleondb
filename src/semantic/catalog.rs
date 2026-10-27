@@ -22,7 +22,10 @@ pub(crate) struct ColumnIndex(pub(crate) usize);
 
 #[derive(Debug)]
 pub(crate) struct DatabaseMetadata {
+    
+    #[allow(dead_code)]
     pub(crate) schema_cell_count: usize,
+    
     pub(crate) page_size: u32,
 }
 
@@ -30,6 +33,8 @@ pub(crate) struct DatabaseMetadata {
 pub(crate) struct TableMetadata {
     pub(crate) root_page: i64,
     pub(crate) schema: TableSchema,
+    
+    #[allow(dead_code)]
     pub(crate) statistics: TableStatistics,
 }
 
@@ -40,11 +45,14 @@ pub(crate) struct TableSchema {
 
 #[derive(Debug, Default)]
 pub(crate) struct TableStatistics {
+
+    #[allow(dead_code)]
     pub(crate) num_rows: Option<u64>,
 }
 
 #[derive(Debug)]
 pub(crate) struct IndexMetadata {
+    #[allow(dead_code)]
     pub(crate) name: String,
     pub(crate) table_id: TableId,
     pub(crate) root_page: u64,
@@ -74,6 +82,7 @@ impl Catalog {
         self.database.page_size
     }
 
+    #[allow(dead_code)]
     pub fn schema_cell_count(&self) -> usize {
         self.database.schema_cell_count
     }

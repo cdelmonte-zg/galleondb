@@ -11,6 +11,8 @@ use super::semantic::catalog::TableId;
 pub(crate) enum LogicalPlan {
     Scan {
         table_id: TableId,
+        
+        #[allow(dead_code)]
         relation_index: usize,
     },
     Filter {
@@ -33,7 +35,6 @@ impl LogicalPlanner {
     pub(crate) fn plan(bound_statement: BoundStatement) -> anyhow::Result<LogicalPlan> {
         match bound_statement {
             BoundStatement::BoundQuery(query) => Self::plan_query(query),
-            _ => bail!("Statement unknown"),
         }
     }
 

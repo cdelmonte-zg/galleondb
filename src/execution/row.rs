@@ -4,7 +4,7 @@ use crate::execution::ExecutionResult;
 use crate::value::Value;
 
 #[derive(Debug)]
-pub(crate) struct Row {
+pub struct Row {
     pub(crate) values: Vec<Value>,
 }
 

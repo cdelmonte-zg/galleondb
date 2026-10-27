@@ -28,7 +28,10 @@ pub(crate) struct Scope<'a> {
 #[derive(Debug)]
 pub(crate) struct ScopeRelation<'a> {
     relation_index: usize,
+
+    #[allow(dead_code)]
     table_name: String,
+    
     metadata: &'a TableMetadata,
 }
 
@@ -92,7 +95,6 @@ impl<'a> Resolver<'a> {
             .map(|item| match item {
                 SelectionExpr(expr) => self.resolve_expression(expr),
                 Wildcard => self.resolve_projection_wildcard(),
-                _ => bail!("Select param unknown: {:?}", item),
             })
             .collect()
     }
@@ -186,8 +188,6 @@ impl<'a> Resolver<'a> {
                 },
                 expr: BoundExprKind::Literal(Literal::Boolean(*boolean)),
             }),
-
-            _ => bail!("Cannot recognize literal"),
         }
     }
 

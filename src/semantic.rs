@@ -69,7 +69,9 @@ pub(crate) struct BoundTable {
 
 #[derive(Debug)]
 pub(crate) struct BoundColumn {
-    relation_index: usize,
+    #[allow(dead_code)]
+    pub(crate) relation_index: usize,
+
     pub(crate) column_index: usize,
 }
 

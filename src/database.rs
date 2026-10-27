@@ -4,8 +4,6 @@ use std::cmp::Ordering;
 use std::fs::File;
 use std::os::unix::fs::FileExt;
 
-use crate::value;
-
 use super::value::Value;
 
 #[derive(Debug)]
@@ -336,7 +334,7 @@ impl Database {
 
             let mut pos = cell_start as usize + 4;
 
-            let payload_size_in_bytes = usize::try_from(self.read_chunk(&mut pos)?)?;
+            let _payload_size_in_bytes = usize::try_from(self.read_chunk(&mut pos)?)?;
 
             let header_start = pos;
 

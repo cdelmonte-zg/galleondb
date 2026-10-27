@@ -9,6 +9,8 @@ pub(crate) enum FunctionId {
     AbsReal,
     AbsInteger,
     Count,
+
+    #[allow(dead_code)]
     Lower,
 }
 
@@ -21,6 +23,8 @@ pub(crate) enum FunctionKind {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub(crate) enum ReturnType {
     Fixed(LogicalType),
+
+    #[allow(dead_code)]
     SameAsArgument(usize),
 }
 
@@ -39,7 +43,10 @@ pub(crate) enum ParameterType {
 
 pub(crate) struct FunctionDefinition {
     id: FunctionId,
+
+    #[allow(dead_code)]
     name: &'static str,
+
     parameters: &'static [ParameterType],
     kind: FunctionKind,
     return_type: ReturnType,
@@ -50,6 +57,7 @@ impl FunctionDefinition {
         self.id
     }
 
+    #[allow(dead_code)]
     pub(super) fn name(&self) -> &'static str {
         self.name
     }
